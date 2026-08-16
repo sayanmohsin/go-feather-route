@@ -29,6 +29,13 @@ func TestLoadRejectsInvalidLimits(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsMalformedNumericEnvironment(t *testing.T) {
+	_, err := Load("", map[string]string{"GOFEATHERROUTE_MAX_BODY_BYTES": "not-a-number"})
+	if err == nil {
+		t.Fatal("expected malformed numeric environment error")
+	}
+}
+
 func TestEnvironmentExample(t *testing.T) {
 	data, err := os.ReadFile("../../.env.example")
 	if err != nil {

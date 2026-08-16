@@ -51,7 +51,9 @@ func Load(path string, env map[string]string) (Config, error) {
 			return Config{}, fmt.Errorf("parse config %q: %w", path, err)
 		}
 	}
-	applyEnvironment(&config, env)
+	if err := applyEnvironment(&config, env); err != nil {
+		return Config{}, err
+	}
 	if err := validate(&config, env); err != nil {
 		return Config{}, err
 	}
@@ -87,7 +89,7 @@ func defaults() Config {
 	}
 }
 
-func applyEnvironment(config *Config, env map[string]string) {
+func applyEnvironment(config *Config, env map[string]string) error {
 	if value := env["GOFEATHERROUTE_ADDR"]; value != "" {
 		config.Server.Address = value
 	}
@@ -98,20 +100,25 @@ func applyEnvironment(config *Config, env map[string]string) {
 		config.Server.RequestTimeoutText = value
 	}
 	if value := env["GOFEATHERROUTE_MAX_BODY_BYTES"]; value != "" {
-		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
-			config.Server.MaxBodyBytes = parsed
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("GOFEATHERROUTE_MAX_BODY_BYTES must be an integer: %w", err)
 		}
+		config.Server.MaxBodyBytes = parsed
 	}
 	if value := env["GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS"]; value != "" {
-		if parsed, err := strconv.Atoi(value); err == nil {
-			config.Server.MaxConcurrentRequests = parsed
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS must be an integer: %w", err)
 		}
+		config.Server.MaxConcurrentRequests = parsed
 	}
 	config.Auth.APIKey = env[config.Auth.APIKeyEnv]
 	for name, provider := range config.Providers {
 		provider.APIKey = env[provider.APIKeyEnv]
 		config.Providers[name] = provider
 	}
+	return nil
 }
 
 func validate(config *Config, env map[string]string) error {
