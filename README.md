@@ -9,7 +9,7 @@
 ## A fast, featherweight model-routing gateway written in Go
 
 Go Feather Route is a small OpenAI-compatible gateway for routing chat
-requests to providers such as OpenAI and DeepSeek. It is designed for small
+requests to OpenAI-compatible provider endpoints. It is designed for small
 VMs, edge services, homelabs, and applications that need a private provider
 boundary without a large platform runtime.
 
@@ -86,9 +86,10 @@ curl -N http://127.0.0.1:4000/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Tell me a short story."}]}'
 ```
 
-To use DeepSeek, set `DEEPSEEK_API_KEY` and request `deepseek-chat`. See the
-[Docker guide](docs/docker.md) and [environment guide](docs/environment.md)
-for configuration, limits, health checks, and deployment patterns.
+Configure any supported OpenAI-compatible provider through the provider base
+URL, model alias, and runtime secret. See the [Docker guide](docs/docker.md)
+and [environment guide](docs/environment.md) for configuration, limits, health
+checks, and deployment patterns.
 
 ## Architecture
 
@@ -99,7 +100,7 @@ OpenAI-compatible client
    Go Feather Route
     |            |
     v            v
-  OpenAI      DeepSeek
+  Provider A  Provider B
 
 Optional later connector:
    Go Feather Route ---> Thingd MCP

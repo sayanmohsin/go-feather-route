@@ -6,7 +6,7 @@ description: A fast, featherweight, OpenAI-compatible model-routing gateway writ
 hero:
   name: Go Feather Route
   text: Route models. Keep the footprint small.
-  tagline: A fast, featherweight, OpenAI-compatible gateway for OpenAI, DeepSeek, and private provider boundaries.
+  tagline: A fast, featherweight, OpenAI-compatible gateway for model APIs and private provider boundaries.
   actions:
     - theme: brand
       text: Start routing →
@@ -33,7 +33,7 @@ features:
     details: Forward Server-Sent Events promptly, preserve [DONE], and cancel upstream work when clients disconnect.
   - icon: ⇄
     title: OpenAI compatible
-    details: Keep existing clients while routing model aliases to OpenAI-compatible providers such as OpenAI and DeepSeek.
+    details: Keep existing clients while routing model aliases to OpenAI-compatible provider endpoints.
   - icon: ▣
     title: Provider isolation
     details: Provider credentials stay server-side behind one private gateway boundary.
@@ -64,20 +64,25 @@ features:
 ## Choose a starting path
 
 <div class="path-grid">
-  <a class="path-card" href="/getting-started"><h3>Run locally</h3><p>Start the Go gateway, configure one provider, and send an OpenAI-compatible request.</p></a>
-  <a class="path-card" href="/docker"><h3>Run with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
-  <a class="path-card" href="/benchmarks"><h3>Compare with LiteLLM</h3><p>Run the deterministic harness and inspect CPU, memory, latency, I/O, and OOM results.</p></a>
-  <a class="path-card" href="/thingd-mcp"><h3>Add Thingd later</h3><p>Keep the router standalone, then connect to Thingd MCP when data-aware routing is needed.</p></a>
+  <a class="path-card" href="./getting-started"><h3>Run locally</h3><p>Start the Go gateway, configure one provider, and send an OpenAI-compatible request.</p></a>
+  <a class="path-card" href="./docker"><h3>Run with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
+  <a class="path-card" href="./benchmarks"><h3>Compare with LiteLLM</h3><p>Run the deterministic harness and inspect CPU, memory, latency, I/O, and OOM results.</p></a>
+  <a class="path-card" href="./thingd-mcp"><h3>Add Thingd later</h3><p>Keep the router standalone, then connect to Thingd MCP when data-aware routing is needed.</p></a>
 </div>
+
+## Supported model APIs
+
+- OpenAI-compatible Chat Completions requests.
+- Configurable model aliases and provider base URLs.
+- Non-streaming and Server-Sent Events streaming responses.
+- Bearer authentication and bounded request/concurrency controls.
 
 ## Start in one command
 
-<div class="terminal-panel">
-docker run --rm -p 4000:4000 \
+<pre class="terminal-panel"><code>docker run --rm -p 4000:4000 \
   -e GOFEATHERROUTE_API_KEY=local-gateway-key \
   -e OPENAI_API_KEY=your-key \
-  sayanmohsin/go-feather-route:latest
-</div>
+  sayanmohsin/go-feather-route:latest</code></pre>
 
 Go Feather Route is early-stage. Review the [roadmap](/roadmap),
 [security model](/security), and [benchmark methodology](/benchmarks) before
@@ -92,7 +97,7 @@ OpenAI-compatible client
    Go Feather Route
       |         |
       v         v
-   OpenAI    DeepSeek
+ Provider A  Provider B
 
 Optional future path:
    Go Feather Route ---> Thingd MCP
