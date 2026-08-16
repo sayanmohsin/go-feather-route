@@ -24,6 +24,7 @@ type Response struct {
 	StatusCode int
 	Header     http.Header
 	Body       io.ReadCloser
+	Attempts   int
 }
 
 type requestIDContextKey struct{}
@@ -49,6 +50,7 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 			}
 			return Response{}, err
 		}
+		response.Attempts = attempt + 1
 		if response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests {
 			return response, nil
 		}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -20,23 +21,36 @@ import (
 
 // Server routes authenticated client requests to configured providers.
 type Server struct {
-	config    config.Config
-	providers map[string]provider.Client
-	semaphore chan struct{}
-	logger    *slog.Logger
-	requests  atomic.Uint64
-	errors    atomic.Uint64
+	config        config.Config
+	providers     map[string]provider.Client
+	semaphore     chan struct{}
+	logger        *slog.Logger
+	requests      atomic.Uint64
+	errors        atomic.Uint64
+	active        atomic.Int64
+	activeStreams atomic.Int64
+	streamsTotal  atomic.Uint64
+	retries       atomic.Uint64
+	bytes         atomic.Uint64
 }
 
 // NewServer constructs a router server from validated configuration.
 func NewServer(cfg config.Config, logger *slog.Logger) *Server {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 32
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.TLSHandshakeTimeout = 5 * time.Second
+	transport.ExpectContinueTimeout = time.Second
+	httpClient := &http.Client{Transport: transport}
 	providers := make(map[string]provider.Client, len(cfg.Providers))
 	for name, item := range cfg.Providers {
 		providers[name] = provider.Client{
 			Name:       name,
 			BaseURL:    item.BaseURL,
 			APIKey:     item.APIKey,
-			HTTPClient: &http.Client{},
+			HTTPClient: httpClient,
 		}
 	}
 	return &Server{
@@ -61,18 +75,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", s.chat)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		started := time.Now()
+		tracked := &metricsResponseWriter{ResponseWriter: response}
+		s.active.Add(1)
+		defer func() {
+			s.active.Add(-1)
+			s.requests.Add(1)
+			if tracked.statusCode >= http.StatusBadRequest {
+				s.errors.Add(1)
+			}
+			s.bytes.Add(uint64(tracked.bytes))
+			s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "request_id", request.Header.Get("X-Request-ID"), "status", tracked.statusCode, "bytes", tracked.bytes, "duration_ms", time.Since(started).Milliseconds())
+		}()
 		requestID := requestID(request.Header.Get("X-Request-ID"))
 		request.Header.Set("X-Request-ID", requestID)
-		response.Header().Set("Server", "Go-Feather-Route")
-		response.Header().Set("X-Request-ID", requestID)
+		tracked.Header().Set("Server", "Go-Feather-Route")
+		tracked.Header().Set("X-Request-ID", requestID)
 		if !isPublicPath(request.URL.Path) && !s.authorized(request) {
-			s.errors.Add(1)
-			s.writeError(response, http.StatusUnauthorized, "invalid or missing bearer token")
+			s.writeError(tracked, http.StatusUnauthorized, "invalid or missing bearer token")
 			return
 		}
-		mux.ServeHTTP(response, request)
-		s.requests.Add(1)
-		s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "duration_ms", time.Since(started).Milliseconds())
+		mux.ServeHTTP(tracked, request)
 	})
 }
 
@@ -101,11 +123,16 @@ func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(response, http.StatusOK, map[string]any{
-		"object":   "gateway_status",
-		"status":   "ok",
-		"requests": s.requests.Load(),
-		"errors":   s.errors.Load(),
-		"models":   len(s.config.Routes),
+		"object":        "gateway_status",
+		"status":        "ok",
+		"requests":      s.requests.Load(),
+		"errors":        s.errors.Load(),
+		"models":        len(s.config.Routes),
+		"active":        s.active.Load(),
+		"streams":       s.activeStreams.Load(),
+		"streams_total": s.streamsTotal.Load(),
+		"retries":       s.retries.Load(),
+		"bytes":         s.bytes.Load(),
 	})
 }
 
@@ -143,6 +170,11 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_requests_total %d\n", s.requests.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_errors_total %d\n", s.errors.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_models_total %d\n", len(s.config.Routes))
+	_, _ = fmt.Fprintf(response, "go_feather_route_active_requests %d\n", s.active.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_active_streams %d\n", s.activeStreams.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_streams_total %d\n", s.streamsTotal.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_retries_total %d\n", s.retries.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_response_bytes_total %d\n", s.bytes.Load())
 }
 
 func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
@@ -181,6 +213,14 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
+	if envelope.Stream {
+		s.activeStreams.Add(1)
+		s.streamsTotal.Add(1)
+		defer s.activeStreams.Add(-1)
+	}
+	if upstream.Attempts > 1 {
+		s.retries.Add(uint64(upstream.Attempts - 1))
+	}
 	if envelope.Stream {
 		s.streamResponse(response, upstream)
 		return
@@ -253,6 +293,38 @@ func copyHeaders(destination, source http.Header) {
 		if value := source.Get(name); value != "" {
 			destination.Set(name, value)
 		}
+	}
+}
+
+type metricsResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	bytes      int64
+}
+
+func (w *metricsResponseWriter) WriteHeader(statusCode int) {
+	if w.statusCode != 0 {
+		return
+	}
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *metricsResponseWriter) Write(data []byte) (int, error) {
+	if w.statusCode == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	count, err := w.ResponseWriter.Write(data)
+	w.bytes += int64(count)
+	return count, err
+}
+
+func (w *metricsResponseWriter) Flush() {
+	if w.statusCode == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
 	}
 }
 
