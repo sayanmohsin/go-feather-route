@@ -1,0 +1,27 @@
+version: "2"
+run:
+  timeout: 3m
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+    - revive
+    - gosec
+    - bodyclose
+    - errorlint
+    - nilerr
+    - perfsprint
+    - prealloc
+    - unconvert
+    - unparam
+formatters:
+  enable:
+    - gofmt
+    - goimports
+issues:
+  max-same-issues: 0

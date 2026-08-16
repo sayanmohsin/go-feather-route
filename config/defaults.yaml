@@ -1,0 +1,19 @@
+server:
+  address: ":4000"
+  log_level: "info"
+  request_timeout: "60s"
+  max_body_bytes: 1048576
+  max_concurrent_requests: 16
+
+auth:
+  api_key_env: "GOFEATHERROUTE_API_KEY"
+
+providers:
+  openai:
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    models: ["gpt-4o-mini"]
+  deepseek:
+    base_url: "https://api.deepseek.com/v1"
+    api_key_env: "DEEPSEEK_API_KEY"
+    models: ["deepseek-chat"]

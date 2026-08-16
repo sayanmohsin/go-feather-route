@@ -1,0 +1,7 @@
+bin/
+coverage.out
+go-feather-route
+.env
+.DS_Store
+docs/.vitepress/dist/
+docs/node_modules/
