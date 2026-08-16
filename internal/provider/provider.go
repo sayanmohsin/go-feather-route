@@ -26,6 +26,13 @@ type Response struct {
 	Body       io.ReadCloser
 }
 
+type requestIDContextKey struct{}
+
+// WithRequestID attaches a gateway request ID to an upstream request context.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDContextKey{}, requestID)
+}
+
 // Chat sends a chat completion request and transfers response-body ownership to the caller.
 func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, error) {
 	if c.APIKey == "" {
@@ -68,6 +75,9 @@ func (c Client) doChat(ctx context.Context, endpoint string, body []byte) (Respo
 	request.Header.Set("Authorization", "Bearer "+c.APIKey)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	if requestID, ok := ctx.Value(requestIDContextKey{}).(string); ok && requestID != "" {
+		request.Header.Set("X-Request-ID", requestID)
+	}
 	response, err := c.HTTPClient.Do(request) //nolint:bodyclose // ownership transfers through Response.
 	if err != nil {
 		return Response{}, fmt.Errorf("call provider %s: %w", c.Name, err)

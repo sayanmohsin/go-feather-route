@@ -3,6 +3,7 @@ package router
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,6 +61,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", s.chat)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		started := time.Now()
+		requestID := requestID(request.Header.Get("X-Request-ID"))
+		request.Header.Set("X-Request-ID", requestID)
+		response.Header().Set("Server", "Go-Feather-Route")
+		response.Header().Set("X-Request-ID", requestID)
 		if !isPublicPath(request.URL.Path) && !s.authorized(request) {
 			s.errors.Add(1)
 			s.writeError(response, http.StatusUnauthorized, "invalid or missing bearer token")
@@ -169,6 +174,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), s.config.Server.RequestTimeout)
 	defer cancel()
+	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
 	upstream, err := client.Chat(ctx, body, envelope.Stream)
 	if err != nil {
 		s.writeError(response, http.StatusBadGateway, err.Error())
@@ -189,8 +195,9 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	if response.Header().Get("Content-Type") == "" {
 		response.Header().Set("Content-Type", "text/event-stream")
 	}
-	response.Header().Set("Cache-Control", "no-cache")
+	response.Header().Set("Cache-Control", "no-cache, no-transform")
 	response.Header().Set("Connection", "keep-alive")
+	response.Header().Set("X-Accel-Buffering", "no")
 	response.WriteHeader(upstream.StatusCode)
 	flusher, canFlush := response.(http.Flusher)
 	buffer := make([]byte, 32*1024)
@@ -242,9 +249,32 @@ func (s *Server) writeError(response http.ResponseWriter, status int, message st
 }
 
 func copyHeaders(destination, source http.Header) {
-	for _, name := range []string{"Content-Type", "X-Request-ID"} {
+	for _, name := range []string{"Content-Type", "Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"} {
 		if value := source.Get(name); value != "" {
 			destination.Set(name, value)
 		}
 	}
+}
+
+func requestID(candidate string) string {
+	if isSafeRequestID(candidate) {
+		return candidate
+	}
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err == nil {
+		return fmt.Sprintf("%x", value)
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func isSafeRequestID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x21 || character > 0x7e {
+			return false
+		}
+	}
+	return true
 }

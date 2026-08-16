@@ -20,6 +20,9 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 		if request.Header.Get("Authorization") != "Bearer provider-secret" {
 			t.Fatal("provider authorization was not forwarded")
 		}
+		if request.Header.Get("X-Request-ID") != "request-123" {
+			t.Fatalf("request id = %q", request.Header.Get("X-Request-ID"))
+		}
 		response.Header().Set("Content-Type", "application/json")
 		_, _ = response.Write([]byte(`{"id":"chatcmpl_test","choices":[]}`))
 	}))
@@ -36,6 +39,7 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[]}`))
 	request.Header.Set("Authorization", "Bearer gateway-secret")
+	request.Header.Set("X-Request-ID", "request-123")
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	server.Config.Handler.ServeHTTP(response, request)
@@ -45,6 +49,9 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "chatcmpl_test") {
 		t.Fatalf("body = %s", response.Body.String())
+	}
+	if response.Header().Get("Server") != "Go-Feather-Route" || response.Header().Get("X-Request-ID") != "request-123" {
+		t.Fatalf("gateway headers = server=%q request-id=%q", response.Header().Get("Server"), response.Header().Get("X-Request-ID"))
 	}
 }
 
@@ -88,6 +95,9 @@ func TestChatStreamsProviderResponse(t *testing.T) {
 	}
 	if response.Header().Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("content type = %q", response.Header().Get("Content-Type"))
+	}
+	if response.Header().Get("Cache-Control") != "no-cache, no-transform" || response.Header().Get("X-Accel-Buffering") != "no" {
+		t.Fatalf("stream headers = cache=%q buffering=%q", response.Header().Get("Cache-Control"), response.Header().Get("X-Accel-Buffering"))
 	}
 	if !strings.Contains(response.Body.String(), "[DONE]") {
 		t.Fatalf("body = %s", response.Body.String())
