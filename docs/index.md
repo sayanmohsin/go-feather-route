@@ -104,5 +104,5 @@ flowchart TB
 
 The router owns authentication, limits, provider selection, streaming, and
 operational boundaries. Provider credentials are injected at runtime. Read the
-[security model](/security), [API reference](/api), and
-[deployment guide](/deployment) before placing it behind a public endpoint.
+[security model](./security), [API reference](./api), and
+[deployment guide](./deployment) before placing it behind a public endpoint.

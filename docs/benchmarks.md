@@ -76,7 +76,7 @@ amd64 under emulation. Workload: 16 fake-provider requests at concurrency 4.
 These figures describe that reference environment and workload; they are not
 universal production guarantees.
 LiteLLM’s emulated architecture and startup behavior materially affect this
-local result. Run the harness on the target deployment architecture before
+reference result. Run the harness on the target deployment architecture before
 making capacity decisions.
 
 ## Optional DeepSeek smoke test
