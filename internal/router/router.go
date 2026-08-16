@@ -82,10 +82,6 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusBadRequest, "request must contain a valid model")
 		return
 	}
-	if envelope.Stream {
-		s.writeError(response, http.StatusNotImplemented, "streaming is implemented in the next release phase")
-		return
-	}
 	client, err := s.clientFor(envelope.Model)
 	if err != nil {
 		s.writeError(response, http.StatusBadRequest, err.Error())
@@ -100,15 +96,45 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), s.config.Server.RequestTimeout)
 	defer cancel()
-	upstream, err := client.Chat(ctx, body, false)
+	upstream, err := client.Chat(ctx, body, envelope.Stream)
 	if err != nil {
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer upstream.Body.Close()
+	if envelope.Stream {
+		s.streamResponse(response, upstream)
+		return
+	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = io.Copy(response, upstream.Body)
+}
+
+func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) {
+	copyHeaders(response.Header(), upstream.Header)
+	if response.Header().Get("Content-Type") == "" {
+		response.Header().Set("Content-Type", "text/event-stream")
+	}
+	response.Header().Set("Cache-Control", "no-cache")
+	response.Header().Set("Connection", "keep-alive")
+	response.WriteHeader(upstream.StatusCode)
+	flusher, canFlush := response.(http.Flusher)
+	buffer := make([]byte, 32*1024)
+	for {
+		count, err := upstream.Body.Read(buffer)
+		if count > 0 {
+			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
+				return
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (s *Server) clientFor(model string) (provider.Client, error) {

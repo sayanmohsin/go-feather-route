@@ -60,3 +60,36 @@ func TestChatRequiresAuthentication(t *testing.T) {
 		t.Fatalf("status = %d", response.Code)
 	}
 }
+
+func TestChatStreamsProviderResponse(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.WriteHeader(http.StatusOK)
+		flusher := response.(http.Flusher)
+		_, _ = response.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n"))
+		flusher.Flush()
+		_, _ = response.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer provider.Close()
+
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	handler := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"messages":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if response.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("content type = %q", response.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(response.Body.String(), "[DONE]") {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
