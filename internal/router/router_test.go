@@ -93,3 +93,46 @@ func TestChatStreamsProviderResponse(t *testing.T) {
 		t.Fatalf("body = %s", response.Body.String())
 	}
 }
+
+func TestOperationalEndpoints(t *testing.T) {
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	handler := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	for _, test := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: "/health/live", wantStatus: http.StatusOK},
+		{path: "/health/liveliness", wantStatus: http.StatusOK},
+		{path: "/ready", wantStatus: http.StatusOK},
+		{path: "/status", wantStatus: http.StatusOK},
+		{path: "/status/models/test-model", wantStatus: http.StatusOK},
+		{path: "/metrics", wantStatus: http.StatusOK},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestReadinessReportsMissingProviderCredentials(t *testing.T) {
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}

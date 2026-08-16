@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sayanmohsin/go-feather-route/internal/config"
@@ -21,6 +23,8 @@ type Server struct {
 	providers map[string]provider.Client
 	semaphore chan struct{}
 	logger    *slog.Logger
+	requests  atomic.Uint64
+	errors    atomic.Uint64
 }
 
 // NewServer constructs a router server from validated configuration.
@@ -45,30 +49,95 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 // Handler returns the HTTP handler for the gateway endpoints.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health/live", s.health)
 	mux.HandleFunc("GET /health/liveliness", s.health)
+	mux.HandleFunc("GET /ready", s.ready)
+	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("GET /status/models", s.models)
+	mux.HandleFunc("GET /status/models/{model}", s.modelStatus)
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("POST /v1/chat/completions", s.chat)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		started := time.Now()
-		if request.URL.Path != "/health/liveliness" && !s.authorized(request) {
+		if !isPublicPath(request.URL.Path) && !s.authorized(request) {
+			s.errors.Add(1)
 			s.writeError(response, http.StatusUnauthorized, "invalid or missing bearer token")
 			return
 		}
 		mux.ServeHTTP(response, request)
+		s.requests.Add(1)
 		s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "duration_ms", time.Since(started).Milliseconds())
 	})
+}
+
+func isPublicPath(path string) bool {
+	return path == "/health/live" || path == "/health/liveliness" || path == "/ready" || path == "/status" || path == "/metrics"
 }
 
 func (s *Server) health(response http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(response, http.StatusOK, map[string]any{"object": "health", "status": "ok"})
 }
 
-func (s *Server) models(response http.ResponseWriter, _ *http.Request) {
-	data := make([]map[string]any, 0, len(s.config.Routes))
+func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
+	ready := false
 	for model, providerName := range s.config.Routes {
+		if providerConfig, ok := s.config.Providers[providerName]; ok && providerConfig.APIKey != "" && model != "" {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		s.writeJSON(response, http.StatusServiceUnavailable, map[string]any{"object": "ready", "status": "degraded", "reason": "no configured provider credentials"})
+		return
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{"object": "ready", "status": "ready"})
+}
+
+func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"object":   "gateway_status",
+		"status":   "ok",
+		"requests": s.requests.Load(),
+		"errors":   s.errors.Load(),
+		"models":   len(s.config.Routes),
+	})
+}
+
+func (s *Server) models(response http.ResponseWriter, _ *http.Request) {
+	modelNames := make([]string, 0, len(s.config.Routes))
+	for model := range s.config.Routes {
+		modelNames = append(modelNames, model)
+	}
+	sort.Strings(modelNames)
+	data := make([]map[string]any, 0, len(modelNames))
+	for _, model := range modelNames {
+		providerName := s.config.Routes[model]
 		data = append(data, map[string]any{"id": model, "object": "model", "owned_by": providerName})
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+func (s *Server) modelStatus(response http.ResponseWriter, request *http.Request) {
+	model := request.PathValue("model")
+	providerName := s.config.Routes[model]
+	if providerName == "" {
+		s.writeError(response, http.StatusNotFound, fmt.Sprintf("model %q is not configured", model))
+		return
+	}
+	providerConfig := s.config.Providers[providerName]
+	status := "configured"
+	if providerConfig.APIKey == "" {
+		status = "missing_credentials"
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{"object": "model_status", "id": model, "provider": providerName, "status": status})
+}
+
+func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
+	response.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	_, _ = fmt.Fprintf(response, "go_feather_route_requests_total %d\n", s.requests.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_errors_total %d\n", s.errors.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_models_total %d\n", len(s.config.Routes))
 }
 
 func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
