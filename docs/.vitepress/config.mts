@@ -1,10 +1,21 @@
-import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 
-export default defineConfig({
+export default withMermaid({
   title: "Go Feather Route",
   description: "A fast, featherweight OpenAI-compatible model router written in Go.",
   base: "/go-feather-route/",
   cleanUrls: true,
+  mermaid: {
+    theme: "dark",
+    themeVariables: {
+      primaryColor: "#132a2a",
+      primaryTextColor: "#f0f7f5",
+      primaryBorderColor: "#7df9d2",
+      lineColor: "#7df9d2",
+      secondaryColor: "#10161d",
+      tertiaryColor: "#0d1218",
+    },
+  },
   themeConfig: {
     nav: [
       { text: "Guide", link: "/getting-started" },
