@@ -16,6 +16,7 @@ type Config struct {
 	Server    ServerConfig              `yaml:"server"`
 	Auth      AuthConfig                `yaml:"auth"`
 	Providers map[string]ProviderConfig `yaml:"providers"`
+	Routes    map[string]string         `yaml:"routes"`
 }
 
 type ServerConfig struct {
@@ -29,12 +30,14 @@ type ServerConfig struct {
 
 type AuthConfig struct {
 	APIKeyEnv string `yaml:"api_key_env"`
+	APIKey    string `yaml:"-"`
 }
 
 type ProviderConfig struct {
 	BaseURL   string   `yaml:"base_url"`
 	APIKeyEnv string   `yaml:"api_key_env"`
 	Models    []string `yaml:"models"`
+	APIKey    string   `yaml:"-"`
 }
 
 func Load(path string, env map[string]string) (Config, error) {
@@ -80,6 +83,7 @@ func defaults() Config {
 			"openai":   {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Models: []string{"gpt-4o-mini"}},
 			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Models: []string{"deepseek-chat"}},
 		},
+		Routes: map[string]string{"gpt-4o-mini": "openai", "deepseek-chat": "deepseek"},
 	}
 }
 
@@ -102,6 +106,11 @@ func applyEnvironment(config *Config, env map[string]string) {
 		if parsed, err := strconv.Atoi(value); err == nil {
 			config.Server.MaxConcurrentRequests = parsed
 		}
+	}
+	config.Auth.APIKey = env[config.Auth.APIKeyEnv]
+	for name, provider := range config.Providers {
+		provider.APIKey = env[provider.APIKeyEnv]
+		config.Providers[name] = provider
 	}
 }
 
