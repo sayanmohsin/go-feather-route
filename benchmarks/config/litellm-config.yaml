@@ -1,0 +1,8 @@
+model_list:
+  - model_name: benchmark-model
+    litellm_params:
+      model: openai/benchmark-model
+      api_base: http://fake-provider:8080/v1
+      api_key: os.environ/FAKE_API_KEY
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

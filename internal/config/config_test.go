@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -56,5 +57,26 @@ func TestEnvironmentExample(t *testing.T) {
 		if !strings.Contains(content, name+"=") {
 			t.Fatalf(".env.example missing %s", name)
 		}
+	}
+}
+
+func TestHTTPProviderRequiresExplicitBenchmarkOptIn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte("providers:\n  fake:\n    base_url: http://fake-provider:8080/v1\n    api_key_env: FAKE_API_KEY\nroutes:\n  test-model: fake\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, map[string]string{"FAKE_API_KEY": "test"}); err == nil {
+		t.Fatal("expected HTTP provider configuration to fail without benchmark opt-in")
+	}
+	config, err := Load(path, map[string]string{
+		"FAKE_API_KEY":                       "test",
+		"GOFEATHERROUTE_ALLOW_INSECURE_HTTP": "true",
+	})
+	if err != nil {
+		t.Fatalf("expected benchmark HTTP provider to load: %v", err)
+	}
+	if !config.AllowInsecureHTTP {
+		t.Fatal("expected benchmark HTTP opt-in to be enabled")
 	}
 }

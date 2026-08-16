@@ -1,0 +1,41 @@
+services:
+  fake-provider:
+    build:
+      context: ..
+      dockerfile: benchmarks/fake-provider/Dockerfile
+    image: go-feather-route-fake-provider:dev
+    environment:
+      FAKE_PROVIDER_CHUNK_DELAY: 1ms
+
+  go-feather-route:
+    profiles: ["go"]
+    build:
+      context: ..
+      args:
+        VERSION: benchmark
+    image: go-feather-route:benchmark
+    ports:
+      - "${BENCHMARK_HOST_PORT:-4400}:4000"
+    environment:
+      GOFEATHERROUTE_CONFIG_FILE: /benchmarks/go-config.yaml
+      GOFEATHERROUTE_API_KEY: benchmark-key
+      GOFEATHERROUTE_ALLOW_INSECURE_HTTP: "true"
+      FAKE_API_KEY: benchmark-provider-key
+    volumes:
+      - ./config/go-config.yaml:/benchmarks/go-config.yaml:ro
+    depends_on:
+      - fake-provider
+
+  litellm:
+    profiles: ["litellm"]
+    image: ghcr.io/berriai/litellm@sha256:a847d1ca7050668bf1f43de2150efb9a7c5837bcf5b56856bcbc6d2b54d21d90
+    ports:
+      - "${BENCHMARK_HOST_PORT:-4400}:4000"
+    environment:
+      LITELLM_MASTER_KEY: benchmark-key
+      FAKE_API_KEY: benchmark-provider-key
+    command: ["--config", "/benchmarks/litellm-config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    volumes:
+      - ./config/litellm-config.yaml:/benchmarks/litellm-config.yaml:ro
+    depends_on:
+      - fake-provider

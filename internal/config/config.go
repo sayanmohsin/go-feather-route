@@ -19,6 +19,8 @@ type Config struct {
 	Auth      AuthConfig                `yaml:"auth"`
 	Providers map[string]ProviderConfig `yaml:"providers"`
 	Routes    map[string]string         `yaml:"routes"`
+	// AllowInsecureHTTP is intended only for local benchmark fixtures.
+	AllowInsecureHTTP bool `yaml:"-"`
 }
 
 // ServerConfig controls the HTTP server and resource limits.
@@ -130,6 +132,7 @@ func applyEnvironment(config *Config, env map[string]string) error {
 		config.Server.MaxConcurrentRequests = parsed
 	}
 	config.Auth.APIKey = env[config.Auth.APIKeyEnv]
+	config.AllowInsecureHTTP = env["GOFEATHERROUTE_ALLOW_INSECURE_HTTP"] == "1" || env["GOFEATHERROUTE_ALLOW_INSECURE_HTTP"] == "true"
 	for name, provider := range config.Providers {
 		provider.APIKey = env[provider.APIKeyEnv]
 		config.Providers[name] = provider
@@ -157,8 +160,14 @@ func validate(config *Config, env map[string]string) error {
 	}
 	for name, provider := range config.Providers {
 		parsedURL, err := url.Parse(provider.BaseURL)
-		if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
-			return fmt.Errorf("providers.%s.base_url must be an https URL", name)
+		if err != nil || parsedURL.Host == "" {
+			return fmt.Errorf("providers.%s.base_url must be a valid URL", name)
+		}
+		if parsedURL.Scheme == "http" && !config.AllowInsecureHTTP {
+			return fmt.Errorf("providers.%s.base_url must be an https URL unless GOFEATHERROUTE_ALLOW_INSECURE_HTTP is enabled for a benchmark fixture", name)
+		}
+		if parsedURL.Scheme != "https" && parsedURL.Scheme != "http" {
+			return fmt.Errorf("providers.%s.base_url must be an https URL unless GOFEATHERROUTE_ALLOW_INSECURE_HTTP is enabled for a benchmark fixture", name)
 		}
 		if provider.APIKeyEnv == "" {
 			return fmt.Errorf("providers.%s.api_key_env must not be empty", name)

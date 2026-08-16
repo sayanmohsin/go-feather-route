@@ -1,0 +1,15 @@
+server:
+  address: ":4000"
+  log_level: error
+  request_timeout: 60s
+  max_body_bytes: 1048576
+  max_concurrent_requests: 64
+auth:
+  api_key_env: GOFEATHERROUTE_API_KEY
+providers:
+  fake:
+    base_url: http://fake-provider:8080/v1
+    api_key_env: FAKE_API_KEY
+    models: [benchmark-model]
+routes:
+  benchmark-model: fake

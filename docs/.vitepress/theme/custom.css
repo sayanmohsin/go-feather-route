@@ -1,0 +1,167 @@
+:root {
+  --vp-c-brand-1: #7df9d2;
+  --vp-c-brand-2: #43d9bd;
+  --vp-c-brand-3: #1aa58d;
+  --vp-c-brand-soft: rgba(125, 249, 210, 0.14);
+  --vp-c-bg: #080b0f;
+  --vp-c-bg-alt: #0d1218;
+  --vp-c-bg-elv: #111820;
+  --vp-c-bg-soft: #10161d;
+  --vp-c-text-1: #f0f7f5;
+  --vp-c-text-2: #aabbb7;
+  --vp-c-text-3: #71837f;
+  --vp-c-divider: rgba(157, 190, 181, 0.16);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #f0f7f5 20%, #7df9d2 75%);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, rgba(125, 249, 210, 0.22), rgba(92, 128, 255, 0.12));
+  --vp-home-hero-image-filter: blur(56px);
+}
+
+html,
+body {
+  background: var(--vp-c-bg);
+}
+
+.VPNavBar {
+  background: rgba(8, 11, 15, 0.82) !important;
+  backdrop-filter: blur(16px);
+}
+
+.VPHero {
+  padding-top: 96px !important;
+  padding-bottom: 64px !important;
+}
+
+.VPHero .name,
+.VPHero .text,
+.VPHero .tagline {
+  letter-spacing: -0.035em;
+}
+
+.VPHero .tagline {
+  max-width: 680px;
+}
+
+.VPHero .actions .VPButton.brand {
+  color: #06100d;
+  font-weight: 750;
+}
+
+.speed-grid,
+.metric-grid,
+.path-grid {
+  display: grid;
+  gap: 16px;
+  margin: 36px auto;
+  max-width: 1120px;
+}
+
+.speed-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.path-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.speed-card,
+.metric-card,
+.path-card {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(17, 24, 32, 0.92), rgba(10, 15, 20, 0.92));
+  padding: 22px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+
+.speed-card:hover,
+.path-card:hover {
+  border-color: rgba(125, 249, 210, 0.42);
+  transform: translateY(-2px);
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.speed-card .icon {
+  color: var(--vp-c-brand-1);
+  font: 700 24px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.speed-card h3,
+.path-card h3 {
+  margin: 14px 0 8px;
+  color: var(--vp-c-text-1);
+}
+
+.speed-card p,
+.path-card p {
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.metric-card {
+  padding: 18px;
+}
+
+.metric-card .label {
+  color: var(--vp-c-text-3);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric-card .value {
+  color: var(--vp-c-brand-1);
+  font: 700 clamp(24px, 4vw, 38px)/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: 10px;
+}
+
+.metric-card .note {
+  color: var(--vp-c-text-3);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.benchmark-note {
+  border-left: 3px solid var(--vp-c-brand-1);
+  color: var(--vp-c-text-2);
+  margin: 26px auto;
+  max-width: 920px;
+  padding: 10px 18px;
+}
+
+.terminal-panel {
+  background: #050708;
+  border: 1px solid rgba(125, 249, 210, 0.22);
+  border-radius: 14px;
+  color: #bafbe8;
+  font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 32px auto;
+  max-width: 920px;
+  overflow-x: auto;
+  padding: 22px;
+}
+
+@media (max-width: 800px) {
+  .speed-grid,
+  .metric-grid,
+  .path-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .VPHero {
+    padding-top: 64px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speed-card:hover,
+  .path-card:hover {
+    transform: none;
+    transition: none;
+  }
+}

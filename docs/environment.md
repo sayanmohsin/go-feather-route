@@ -10,6 +10,7 @@ secret manager, or injected CI/runtime environment variables.
 | `GOFEATHERROUTE_REQUEST_TIMEOUT` | Upstream timeout |
 | `GOFEATHERROUTE_MAX_BODY_BYTES` | Request size limit |
 | `GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS` | Concurrency limit |
+| `GOFEATHERROUTE_ALLOW_INSECURE_HTTP` | Benchmark-only HTTP fake-provider opt-in; keep disabled in production |
 | `OPENAI_API_KEY` | OpenAI provider secret |
 | `DEEPSEEK_API_KEY` | DeepSeek provider secret |
 

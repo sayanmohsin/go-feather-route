@@ -9,7 +9,7 @@ GOSEC_VERSION := v2.22.8
 GOVULNCHECK_VERSION := v1.1.4
 GOLANGCILINT_VERSION := v2.1.6
 
-.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench build docker check
+.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench benchmark-go benchmark-litellm benchmark-deepseek build docker check
 
 tools:
 	mkdir -p $(TOOLS_BIN)
@@ -55,6 +55,15 @@ env-example-check:
 
 bench:
 	go test -bench=. -benchmem ./...
+
+benchmark-go:
+	./benchmarks/run.sh go
+
+benchmark-litellm:
+	./benchmarks/run.sh litellm
+
+benchmark-deepseek:
+	./scripts/benchmark-deepseek.sh
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/go-feather-route

@@ -125,6 +125,7 @@ feature matrix. See the [performance](docs/performance.md),
 - [Streaming](docs/streaming.md)
 - [Docker deployment](docs/docker.md)
 - [Benchmarks](docs/benchmarks.md)
+- [LiteLLM benchmark harness](benchmarks/README.md)
 - [Optional Thingd MCP connector](docs/thingd-mcp.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)

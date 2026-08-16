@@ -9,6 +9,7 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/getting-started" },
       { text: "API", link: "/api" },
+      { text: "Benchmarks", link: "/benchmarks" },
       { text: "GitHub", link: "https://github.com/sayanmohsin/go-feather-route" },
       { text: "Docker Hub", link: "https://hub.docker.com/r/sayanmohsin/go-feather-route" },
     ],
