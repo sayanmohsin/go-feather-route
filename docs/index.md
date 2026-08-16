@@ -71,10 +71,10 @@ flowchart LR
 ## Choose a starting path
 
 <div class="path-grid">
-  <a class="path-card" href="./getting-started"><h3>Start routing</h3><p>Configure one provider and send an OpenAI-compatible request.</p></a>
-  <a class="path-card" href="./docker"><h3>Deploy with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
-  <a class="path-card" href="./benchmarks"><h3>Measure the gateway</h3><p>Compare routing overhead and resource use with the pinned LiteLLM reference image.</p></a>
-  <a class="path-card" href="./thingd-mcp"><h3>Connect Thingd later</h3><p>Keep the router standalone, then add data-aware capabilities through MCP.</p></a>
+  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/getting-started"><h3>Start routing</h3><p>Configure one provider and send an OpenAI-compatible request.</p></a>
+  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/docker"><h3>Deploy with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
+  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/benchmarks"><h3>Measure the gateway</h3><p>Compare routing overhead and resource use with the pinned LiteLLM reference image.</p></a>
+  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/thingd-mcp"><h3>Connect Thingd later</h3><p>Keep the router standalone, then add data-aware capabilities through MCP.</p></a>
 </div>
 
 ## Long-term direction
@@ -104,5 +104,7 @@ flowchart TB
 
 The router owns authentication, limits, provider selection, streaming, and
 operational boundaries. Provider credentials are injected at runtime. Read the
-[security model](./security), [API reference](./api), and
-[deployment guide](./deployment) before placing it behind a public endpoint.
+  [security model](https://sayanmohsin.github.io/go-feather-route/security),
+  [API reference](https://sayanmohsin.github.io/go-feather-route/api), and
+  [deployment guide](https://sayanmohsin.github.io/go-feather-route/deployment)
+  before placing it behind a public endpoint.
