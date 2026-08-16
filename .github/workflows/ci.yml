@@ -20,12 +20,6 @@ jobs:
           cache: true
       - name: Install pinned Go tools
         run: make tools
-      - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          install-mode: binary
-          version: v2.1.6
-          args: --timeout=3m
       - run: make fmt-check
       - run: make test
       - run: make race

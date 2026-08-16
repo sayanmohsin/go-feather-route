@@ -1,6 +1,6 @@
 bin/
 coverage.out
-go-feather-route
+/go-feather-route
 .env
 .DS_Store
 docs/.vitepress/dist/
