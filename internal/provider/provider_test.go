@@ -27,7 +27,7 @@ func TestClientRetriesRetryableNonStreamingResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer result.Body.Close()
+	defer func() { _ = result.Body.Close() }()
 	if attempts != 2 || result.StatusCode != http.StatusOK {
 		t.Fatalf("attempts=%d status=%d", attempts, result.StatusCode)
 	}
@@ -46,7 +46,7 @@ func TestClientDoesNotRetryStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer result.Body.Close()
+	defer func() { _ = result.Body.Close() }()
 	if attempts != 1 || result.StatusCode != http.StatusBadGateway {
 		t.Fatalf("attempts=%d status=%d", attempts, result.StatusCode)
 	}

@@ -1,3 +1,4 @@
+// Package router exposes the OpenAI-compatible HTTP gateway.
 package router
 
 import (
@@ -14,6 +15,7 @@ import (
 	"github.com/sayanmohsin/go-feather-route/internal/provider"
 )
 
+// Server routes authenticated client requests to configured providers.
 type Server struct {
 	config    config.Config
 	providers map[string]provider.Client
@@ -21,6 +23,7 @@ type Server struct {
 	logger    *slog.Logger
 }
 
+// NewServer constructs a router server from validated configuration.
 func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 	providers := make(map[string]provider.Client, len(cfg.Providers))
 	for name, item := range cfg.Providers {
@@ -39,6 +42,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 	}
 }
 
+// Handler returns the HTTP handler for the gateway endpoints.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/liveliness", s.health)
@@ -101,7 +105,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer upstream.Body.Close()
+	defer func() { _ = upstream.Body.Close() }()
 	if envelope.Stream {
 		s.streamResponse(response, upstream)
 		return

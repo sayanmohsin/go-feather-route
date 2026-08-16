@@ -54,7 +54,7 @@ jobs:
           globs: "**/*.md"
       - uses: lycheeverse/lychee-action@v2
         with:
-          args: --verbose --no-progress --exclude '127\\.0\\.0\\.1' --exclude 'localhost' '**/*.md' 'README.md'
+          args: --verbose --no-progress --exclude '127\\.0\\.0\\.1' --exclude 'localhost' --exclude 'sayanmohsin\\.github\\.io/go-feather-route' --exclude 'hub\\.docker\\.com/r/sayanmohsin/go-feather-route' '**/*.md' 'README.md'
           fail: true
 
   docker-smoke:

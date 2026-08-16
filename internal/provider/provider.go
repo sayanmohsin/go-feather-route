@@ -1,3 +1,4 @@
+// Package provider contains small HTTP clients for OpenAI-compatible providers.
 package provider
 
 import (
@@ -10,6 +11,7 @@ import (
 	"time"
 )
 
+// Client sends OpenAI-compatible chat requests to one provider.
 type Client struct {
 	Name       string
 	BaseURL    string
@@ -17,12 +19,14 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// Response is an upstream response whose body ownership belongs to the caller.
 type Response struct {
 	StatusCode int
 	Header     http.Header
 	Body       io.ReadCloser
 }
 
+// Chat sends a chat completion request and transfers response-body ownership to the caller.
 func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, error) {
 	if c.APIKey == "" {
 		return Response{}, fmt.Errorf("provider %s is not configured: API key is empty", c.Name)
@@ -64,9 +68,9 @@ func (c Client) doChat(ctx context.Context, endpoint string, body []byte) (Respo
 	request.Header.Set("Authorization", "Bearer "+c.APIKey)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
-	response, err := c.HTTPClient.Do(request)
+	response, err := c.HTTPClient.Do(request) //nolint:bodyclose // ownership transfers through Response.
 	if err != nil {
 		return Response{}, fmt.Errorf("call provider %s: %w", c.Name, err)
 	}
-	return Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil
+	return Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil //nolint:bodyclose // ownership transfers to the caller.
 }

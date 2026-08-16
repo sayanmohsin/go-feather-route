@@ -14,4 +14,5 @@ secret manager, or injected CI/runtime environment variables.
 | `DEEPSEEK_API_KEY` | DeepSeek provider secret |
 
 The committed `.env.example` contains names and safe values only. It is
-generated from `config/env.schema.yaml` and is not a production secret store.
+schema-checked against `config/env.schema.yaml` and is not a production secret
+store.

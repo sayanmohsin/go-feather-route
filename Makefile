@@ -7,6 +7,7 @@ STATICCHECK_VERSION := 2025.1.1
 GOIMPORTS_VERSION := v0.36.0
 GOSEC_VERSION := v2.22.8
 GOVULNCHECK_VERSION := v1.1.4
+GOLANGCILINT_VERSION := v2.1.6
 
 .PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench build docker check
 
@@ -16,7 +17,7 @@ tools:
 	GOBIN=$(TOOLS_BIN) go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
 	GOBIN=$(TOOLS_BIN) go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
 	GOBIN=$(TOOLS_BIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
-	@command -v golangci-lint >/dev/null || echo "Install golangci-lint v2 separately: https://golangci-lint.run/docs/welcome/install/"
+	GOBIN=$(TOOLS_BIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION)
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
@@ -24,6 +25,7 @@ fmt:
 
 fmt-check:
 	test -z "$$(gofmt -l .)"
+	test -z "$$($(TOOLS_BIN)/goimports -l $$(find . -name '*.go' -not -path './vendor/*'))"
 
 test:
 	go test ./...

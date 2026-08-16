@@ -1,3 +1,4 @@
+// Package config loads and validates Go Feather Route configuration.
 package config
 
 import (
@@ -12,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config is the validated application configuration.
 type Config struct {
 	Server    ServerConfig              `yaml:"server"`
 	Auth      AuthConfig                `yaml:"auth"`
@@ -19,6 +21,7 @@ type Config struct {
 	Routes    map[string]string         `yaml:"routes"`
 }
 
+// ServerConfig controls the HTTP server and resource limits.
 type ServerConfig struct {
 	Address               string        `yaml:"address"`
 	LogLevel              string        `yaml:"log_level"`
@@ -28,11 +31,13 @@ type ServerConfig struct {
 	MaxConcurrentRequests int           `yaml:"max_concurrent_requests"`
 }
 
+// AuthConfig controls gateway authentication.
 type AuthConfig struct {
 	APIKeyEnv string `yaml:"api_key_env"`
 	APIKey    string `yaml:"-"`
 }
 
+// ProviderConfig describes one upstream provider.
 type ProviderConfig struct {
 	BaseURL   string   `yaml:"base_url"`
 	APIKeyEnv string   `yaml:"api_key_env"`
@@ -40,10 +45,11 @@ type ProviderConfig struct {
 	APIKey    string   `yaml:"-"`
 }
 
+// Load reads a YAML configuration file and applies environment overrides.
 func Load(path string, env map[string]string) (Config, error) {
 	config := defaults()
 	if path != "" {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- the operator explicitly selects the config path.
 		if err != nil {
 			return Config{}, fmt.Errorf("read config %q: %w", path, err)
 		}
@@ -60,6 +66,7 @@ func Load(path string, env map[string]string) (Config, error) {
 	return config, nil
 }
 
+// LoadFromEnvironment loads configuration using the current process environment.
 func LoadFromEnvironment() (Config, error) {
 	env := make(map[string]string)
 	for _, item := range os.Environ() {
@@ -68,7 +75,16 @@ func LoadFromEnvironment() (Config, error) {
 			env[key] = value
 		}
 	}
-	return Load(env["GOFEATHERROUTE_CONFIG_FILE"], env)
+	path := env["GOFEATHERROUTE_CONFIG_FILE"]
+	if path == "" {
+		for _, candidate := range []string{"config/defaults.yaml", "/etc/go-feather-route/defaults.yaml"} {
+			if _, err := os.Stat(candidate); err == nil {
+				path = candidate
+				break
+			}
+		}
+	}
+	return Load(path, env)
 }
 
 func defaults() Config {
