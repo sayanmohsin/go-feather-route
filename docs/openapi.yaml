@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: Go Feather Route API
+  version: 0.1.0
+  description: OpenAI-compatible model routing gateway.
+servers:
+  - url: http://localhost:4000
+paths:
+  /health/liveliness:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Service is alive.
+  /v1/models:
+    get:
+      operationId: listModels
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Configured models.
+  /v1/chat/completions:
+    post:
+      operationId: createChatCompletion
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: Chat completion or text/event-stream response.
+        '400': { description: Invalid request. }
+        '401': { description: Invalid credentials. }
+        '502': { description: Provider failure. }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model: { type: string }
+        messages:
+          type: array
+          items: { type: object, additionalProperties: true }
+        stream: { type: boolean, default: false }
+      additionalProperties: true
