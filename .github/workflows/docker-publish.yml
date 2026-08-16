@@ -36,7 +36,7 @@ jobs:
           else
             version="${TAG_NAME#v}"
           fi
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+$'; then
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "version must be a full SemVer value" >&2
             exit 1
           fi
