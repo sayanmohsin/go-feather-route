@@ -22,6 +22,7 @@ export default defineConfig({
           { text: "Configuration", link: "/configuration" },
           { text: "Environment", link: "/environment" },
           { text: "Providers and routing", link: "/providers" },
+          { text: "Routing model", link: "/routing" },
           { text: "Streaming", link: "/streaming" },
           { text: "Authentication", link: "/authentication" },
           { text: "Docker", link: "/docker" },

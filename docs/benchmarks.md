@@ -59,9 +59,9 @@ Linux hosts may expose additional cgroup peak-memory and CPU-throttling data.
 Docker Desktop reports the VM resource envelope, so host and container values
 must be interpreted with the recorded platform and architecture.
 
-## Local snapshot
+## Reference measurement
 
-The current development snapshot was recorded on an Apple M1 Max with Docker
+The reference measurement was recorded on an Apple M1 Max with Docker
 Desktop. The Go image ran natively as arm64; the pinned LiteLLM image ran as
 amd64 under emulation. Workload: 16 fake-provider requests at concurrency 4.
 
@@ -73,7 +73,8 @@ amd64 under emulation. Workload: 16 fake-provider requests at concurrency 4.
 | Requests per second | 1,522.64 | 17.98 |
 | Image size | ~8.7 MB | upstream image |
 
-These are labeled development measurements, not universal production claims.
+These figures describe that reference environment and workload; they are not
+universal production guarantees.
 LiteLLM’s emulated architecture and startup behavior materially affect this
 local result. Run the harness on the target deployment architecture before
 making capacity decisions.

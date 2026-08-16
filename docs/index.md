@@ -6,7 +6,7 @@ description: A fast, featherweight, OpenAI-compatible model-routing gateway writ
 hero:
   name: Go Feather Route
   text: Route models. Keep the footprint small.
-  tagline: A fast, featherweight, OpenAI-compatible gateway for model APIs and private provider boundaries.
+  tagline: A focused OpenAI-compatible gateway for model APIs, private provider boundaries, and streaming workloads.
   actions:
     - theme: brand
       text: Start routing →
@@ -18,7 +18,7 @@ hero:
       text: Docker Hub
       link: https://hub.docker.com/r/sayanmohsin/go-feather-route
     - theme: alt
-      text: Benchmark LiteLLM
+      text: Benchmark details
       link: /benchmarks
 
 features:
@@ -30,7 +30,7 @@ features:
     details: Bounded bodies, concurrency, timeouts, and memory-conscious container packaging for small hosts.
   - icon: ≋
     title: Streaming first
-    details: Forward Server-Sent Events promptly, preserve [DONE], and cancel upstream work when clients disconnect.
+    details: Forward Server-Sent Events promptly and cancel upstream work when clients disconnect.
   - icon: ⇄
     title: OpenAI compatible
     details: Keep existing clients while routing model aliases to OpenAI-compatible provider endpoints.
@@ -39,71 +39,70 @@ features:
     details: Provider credentials stay server-side behind one private gateway boundary.
   - icon: ◈
     title: Thingd optional
-    details: Add the future Thingd MCP connector when you need data-aware capabilities without embedding Thingd in the router.
+    details: Add data-aware capabilities through Thingd MCP without embedding Thingd in the router.
 ---
 
 <div class="benchmark-note">
-  <strong>Measured speed snapshot:</strong> the local fake-provider comparison is
-  reproducible and reports latency, CPU, memory, I/O, process count, and OOM
-  state. Read the methodology before interpreting the numbers.
+  <strong>Reference performance:</strong> the benchmark harness reports latency,
+  throughput, CPU, memory, I/O, process count, cgroup peaks, and OOM state
+  where the host exposes those measurements. See the benchmark guide for the
+  measurement environment and interpretation rules.
 </div>
 
 <div class="metric-grid">
-  <div class="metric-card"><div class="label">Go gateway idle RSS</div><div class="value">~4.5 MiB</div><div class="note">Local Docker smoke snapshot</div></div>
-  <div class="metric-card"><div class="label">LiteLLM idle RSS</div><div class="value">~1.0 GiB</div><div class="note">Pinned image, local snapshot</div></div>
-  <div class="metric-card"><div class="label">Go p50 proxy</div><div class="value">0.64 ms</div><div class="note">16 requests / concurrency 4</div></div>
-  <div class="metric-card"><div class="label">Go image</div><div class="value">8.7 MB</div><div class="note">Static arm64 image</div></div>
+  <div class="metric-card"><div class="label">Gateway idle RSS</div><div class="value">~4.5 MiB</div><div class="note">Reference container measurement</div></div>
+  <div class="metric-card"><div class="label">Proxy p50</div><div class="value">0.64 ms</div><div class="note">16 requests / concurrency 4</div></div>
+  <div class="metric-card"><div class="label">Gateway image</div><div class="value">8.7 MB</div><div class="note">Static arm64 image</div></div>
+  <div class="metric-card"><div class="label">Streaming</div><div class="value">SSE</div><div class="note">Forwarded without full buffering</div></div>
 </div>
 
-<div class="benchmark-note">
-  Snapshot context: Apple M1 Max, Docker Desktop, 16 fake-provider requests at
-  concurrency 4. LiteLLM ran its pinned amd64 image under local emulation. These
-  values are a labeled development snapshot, not a production guarantee.
-</div>
+## How a request moves
+
+```mermaid
+flowchart LR
+    client[OpenAI-compatible client] --> auth[Bearer authentication]
+    auth --> limits[Body, timeout, and concurrency limits]
+    limits --> route[Model alias routing]
+    route --> upstream[OpenAI-compatible provider]
+    upstream --> response[JSON or streamed SSE response]
+    response --> client
+```
 
 ## Choose a starting path
 
 <div class="path-grid">
-  <a class="path-card" href="./getting-started"><h3>Run locally</h3><p>Start the Go gateway, configure one provider, and send an OpenAI-compatible request.</p></a>
-  <a class="path-card" href="./docker"><h3>Run with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
-  <a class="path-card" href="./benchmarks"><h3>Compare with LiteLLM</h3><p>Run the deterministic harness and inspect CPU, memory, latency, I/O, and OOM results.</p></a>
-  <a class="path-card" href="./thingd-mcp"><h3>Add Thingd later</h3><p>Keep the router standalone, then connect to Thingd MCP when data-aware routing is needed.</p></a>
+  <a class="path-card" href="./getting-started"><h3>Start routing</h3><p>Configure one provider and send an OpenAI-compatible request.</p></a>
+  <a class="path-card" href="./docker"><h3>Deploy with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
+  <a class="path-card" href="./benchmarks"><h3>Measure the gateway</h3><p>Compare routing overhead and resource use with the pinned LiteLLM reference image.</p></a>
+  <a class="path-card" href="./thingd-mcp"><h3>Connect Thingd later</h3><p>Keep the router standalone, then add data-aware capabilities through MCP.</p></a>
 </div>
 
-## Supported model APIs
+## Long-term direction
 
-- OpenAI-compatible Chat Completions requests.
-- Configurable model aliases and provider base URLs.
-- Non-streaming and Server-Sent Events streaming responses.
-- Bearer authentication and bounded request/concurrency controls.
+The project is designed to remain a small operational boundary as its
+capabilities grow: more compatible providers, embeddings and multimodal
+requests, per-tenant quotas, usage metrics, health-aware routing, graceful
+degradation, memory-aware deployment profiles, and optional Thingd MCP data
+capabilities.
+
+```mermaid
+flowchart TB
+    gateway[Go Feather Route]
+    gateway --> chat[Chat and streaming]
+    gateway --> models[Model discovery and aliases]
+    gateway --> ops[Health, readiness, and metrics]
+    gateway -. future .-> embeddings[Embeddings and multimodal APIs]
+    gateway -. optional .-> thingd[Thingd MCP data capabilities]
+```
 
 ## Start in one command
 
 <pre class="terminal-panel"><code>docker run --rm -p 4000:4000 \
-  -e GOFEATHERROUTE_API_KEY=local-gateway-key \
+  -e GOFEATHERROUTE_API_KEY=gateway-key \
   -e OPENAI_API_KEY=your-key \
-  sayanmohsin/go-feather-route:latest</code></pre>
+  sayanmohsin/go-feather-route:0.1.0</code></pre>
 
-Go Feather Route is early-stage. Review the [roadmap](/roadmap),
-[security model](/security), and [benchmark methodology](/benchmarks) before
-using it in production.
-
-## How it fits together
-
-```text
-OpenAI-compatible client
-          |
-          v
-   Go Feather Route
-      |         |
-      v         v
- Provider A  Provider B
-
-Optional future path:
-   Go Feather Route ---> Thingd MCP
-```
-
-The router owns request limits, authentication, provider selection, streaming,
-and operational boundaries. LiteLLM remains a supported comparison and gateway
-option; Go Feather Route is designed for deployments where a smaller router
-footprint is important.
+The router owns authentication, limits, provider selection, streaming, and
+operational boundaries. Provider credentials are injected at runtime. Read the
+[security model](/security), [API reference](/api), and
+[deployment guide](/deployment) before placing it behind a public endpoint.

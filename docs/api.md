@@ -1,21 +1,74 @@
 # API reference
 
-The gateway implements the OpenAI-compatible subset needed by the MVP.
+Go Feather Route exposes a small OpenAI-compatible surface plus operational
+endpoints. The complete machine-readable contract is in
+[`openapi.yaml`](openapi.yaml).
 
-## Health
+## Request flow
 
-`GET /health/liveliness` is unauthenticated and returns a small JSON health
-document. Use it for container liveness, not provider readiness.
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant P as Provider
+    C->>G: POST /v1/chat/completions
+    G->>G: Authenticate and apply limits
+    G->>P: Forward model request
+    P-->>G: JSON or SSE response
+    G-->>C: OpenAI-compatible response
+```
 
-## Models
+## Authentication
 
-`GET /v1/models` lists configured model aliases. API routes require the gateway
-bearer token.
+Set `Authorization: Bearer <GOFEATHERROUTE_API_KEY>` for protected routes:
 
-## Chat completions
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `GET /status/models`
+- `GET /status/models/{model}`
 
-`POST /v1/chat/completions` accepts an OpenAI-compatible chat request. The
-`model`, `messages`, and optional generation parameters are forwarded to the
-selected provider. Set `stream: true` for SSE streaming.
+Liveness, readiness, aggregate status, metrics, and the container healthcheck
+path are unauthenticated so infrastructure can probe them.
 
-See the normative [OpenAPI contract](openapi.yaml) and [streaming guide](streaming.md).
+## Endpoints
+
+### Health and operations
+
+- `GET /health/live` and `/health/liveliness` return `{ "object": "health", "status": "ok" }`.
+- `GET /ready` returns `200` when at least one configured route has provider credentials, otherwise `503`.
+- `GET /status` returns gateway counters and configured model count.
+- `GET /status/models` lists aliases; `/status/models/{model}` returns route and credential status.
+- `GET /metrics` returns Prometheus-compatible counters.
+
+### `GET /v1/models`
+
+Returns configured model aliases in OpenAI list format.
+
+### `POST /v1/chat/completions`
+
+Accepts an OpenAI-compatible chat request. `model` is required. The body is
+forwarded to the selected provider after gateway limits and routing are
+applied. Use `stream: true` for Server-Sent Events forwarding.
+
+```bash
+curl http://127.0.0.1:4000/v1/chat/completions \
+  -H 'Authorization: Bearer gateway-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+## Errors
+
+Errors use the OpenAI-compatible shape:
+
+```json
+{"error":{"message":"invalid or missing bearer token","type":"go_feather_route_error"}}
+```
+
+The gateway uses `401` for authentication failures, `400` for invalid input,
+`413` for oversized bodies, `502` for upstream failures, and `503` for
+degraded readiness.
+
+Embeddings, multimodal requests, per-tenant quotas, and richer metrics are
+long-term directions. They are not advertised as available routes until their
+implementation and OpenAPI schemas are shipped together.
