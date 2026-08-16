@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,6 +25,8 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 			t.Fatalf("request id = %q", request.Header.Get("X-Request-ID"))
 		}
 		response.Header().Set("Content-Type", "application/json")
+		response.Header().Set("X-Request-ID", "provider-id")
+		response.Header().Set("X-RateLimit-Limit", "10")
 		_, _ = response.Write([]byte(`{"id":"chatcmpl_test","choices":[]}`))
 	}))
 	defer provider.Close()
@@ -52,6 +55,9 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 	}
 	if response.Header().Get("Server") != "Go-Feather-Route" || response.Header().Get("X-Request-ID") != "request-123" {
 		t.Fatalf("gateway headers = server=%q request-id=%q", response.Header().Get("Server"), response.Header().Get("X-Request-ID"))
+	}
+	if response.Header().Get("X-RateLimit-Limit") != "10" {
+		t.Fatalf("rate limit header = %q", response.Header().Get("X-RateLimit-Limit"))
 	}
 }
 
@@ -144,5 +150,76 @@ func TestReadinessReportsMissingProviderCredentials(t *testing.T) {
 	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestGatewayGeneratesRequestID(t *testing.T) {
+	cfg := config.Config{Server: config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1}}
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/live", nil))
+	requestID := response.Header().Get("X-Request-ID")
+	if len(requestID) != 32 || !isSafeRequestID(requestID) {
+		t.Fatalf("generated request id = %q", requestID)
+	}
+	if response.Header().Get("Server") != "Go-Feather-Route" {
+		t.Fatalf("server header = %q", response.Header().Get("Server"))
+	}
+}
+
+func TestMetricsAccountForUnauthorizedRequests(t *testing.T) {
+	cfg := config.Config{
+		Server: config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Auth:   config.AuthConfig{APIKey: "gateway-secret"},
+	}
+	handler := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+	metrics := httptest.NewRecorder()
+	handler.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "go_feather_route_errors_total 1") {
+		t.Fatalf("metrics = %s", metrics.Body.String())
+	}
+}
+
+func TestStreamingCancellationReachesProvider(t *testing.T) {
+	providerCanceled := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.WriteHeader(http.StatusOK)
+		_, _ = response.Write([]byte(`data: {"choices":[]}` + "\n\n"))
+		response.(http.Flusher).Flush()
+		<-request.Context().Done()
+		close(providerCanceled)
+	}))
+	defer provider.Close()
+
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: 5 * time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	gateway := httptest.NewServer(NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer gateway.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, gateway.URL+"/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"messages":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	_ = response.Body.Close()
+
+	select {
+	case <-providerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider request was not canceled")
 	}
 }

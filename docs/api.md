@@ -40,6 +40,10 @@ path are unauthenticated so infrastructure can probe them.
 - `GET /status/models` lists aliases; `/status/models/{model}` returns route and credential status.
 - `GET /metrics` returns Prometheus-compatible counters.
 
+Gateway responses include `Server: Go-Feather-Route` and a generated or
+preserved `X-Request-ID`. Provider rate-limit headers are forwarded from a
+small allowlist; hop-by-hop and authorization headers are never returned.
+
 ### `GET /v1/models`
 
 Returns configured model aliases in OpenAI list format.
