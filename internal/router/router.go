@@ -4,6 +4,7 @@ package router
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -83,7 +85,9 @@ func (s *Server) Handler() http.Handler {
 			if tracked.statusCode >= http.StatusBadRequest {
 				s.errors.Add(1)
 			}
-			s.bytes.Add(uint64(tracked.bytes))
+			if tracked.bytes > 0 {
+				s.bytes.Add(uint64(tracked.bytes)) // #nosec G115 -- bytes is checked positive and uint64 has a wider positive range.
+			}
 			s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "request_id", request.Header.Get("X-Request-ID"), "status", tracked.statusCode, "bytes", tracked.bytes, "duration_ms", time.Since(started).Milliseconds())
 		}()
 		requestID := requestID(request.Header.Get("X-Request-ID"))
@@ -218,9 +222,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.streamsTotal.Add(1)
 		defer s.activeStreams.Add(-1)
 	}
-	if upstream.Attempts > 1 {
-		s.retries.Add(uint64(upstream.Attempts - 1))
-	}
+	s.retries.Add(retryCount(upstream.Attempts))
 	if envelope.Stream {
 		s.streamResponse(response, upstream)
 		return
@@ -334,9 +336,16 @@ func requestID(candidate string) string {
 	}
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err == nil {
-		return fmt.Sprintf("%x", value)
+		return hex.EncodeToString(value[:])
 	}
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return strconv.FormatInt(time.Now().UnixNano(), 10)
+}
+
+func retryCount(attempts int) uint64 {
+	if attempts <= 1 {
+		return 0
+	}
+	return uint64(attempts - 1) // #nosec G115 -- attempts is checked above and bounded by the provider retry policy.
 }
 
 func isSafeRequestID(value string) bool {
