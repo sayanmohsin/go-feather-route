@@ -8,7 +8,7 @@ GOIMPORTS_VERSION := v0.36.0
 GOSEC_VERSION := v2.22.8
 GOVULNCHECK_VERSION := v1.1.4
 
-.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench build check
+.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench build docker check
 
 tools:
 	mkdir -p $(TOOLS_BIN)
@@ -55,5 +55,8 @@ bench:
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/go-feather-route
+
+docker:
+	docker buildx build --platform linux/amd64,linux/arm64 --tag go-feather-route:dev .
 
 check: fmt-check test lint security config-check env-example-check

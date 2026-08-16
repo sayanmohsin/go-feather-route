@@ -1,0 +1,24 @@
+services:
+  go-feather-route:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    image: go-feather-route:dev
+    ports:
+      - "4000:4000"
+    environment:
+      GOFEATHERROUTE_API_KEY: ${GOFEATHERROUTE_API_KEY:?GOFEATHERROUTE_API_KEY must be set}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
