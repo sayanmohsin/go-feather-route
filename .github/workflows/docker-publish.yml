@@ -63,3 +63,11 @@ jobs:
           build-args: VERSION=${{ steps.version.outputs.version }}
           provenance: mode=max
           sbom: true
+      - name: Sync Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: sayanmohsin
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: ${{ env.IMAGE_NAME }}
+          short-description: Fast, featherweight, OpenAI-compatible model-routing gateway written in Go.
+          readme-filepath: ./README.md

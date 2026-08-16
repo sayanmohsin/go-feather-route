@@ -63,6 +63,33 @@ docker run --rm -p 4000:4000 \
   sayanmohsin/go-feather-route:latest
 ```
 
+For a reproducible deployment, use the immutable release tag instead of
+`latest`:
+
+```bash
+docker run --rm -p 4000:4000 \
+  -e GOFEATHERROUTE_API_KEY=local-gateway-key \
+  -e OPENAI_API_KEY=your-key \
+  sayanmohsin/go-feather-route:0.1.0
+```
+
+The gateway key protects `/v1/models` and `/v1/chat/completions`. Provider keys
+are supplied only at runtime. Never put real credentials in a Dockerfile,
+`.env.example`, a committed Compose file, or an image layer.
+
+Try streaming:
+
+```bash
+curl -N http://127.0.0.1:4000/v1/chat/completions \
+  -H 'Authorization: Bearer local-gateway-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Tell me a short story."}]}'
+```
+
+To use DeepSeek, set `DEEPSEEK_API_KEY` and request `deepseek-chat`. See the
+[Docker guide](docs/docker.md) and [environment guide](docs/environment.md)
+for configuration, limits, health checks, and deployment patterns.
+
 ## Architecture
 
 ```text
