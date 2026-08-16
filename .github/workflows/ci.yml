@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install pinned Go tools
+        run: make tools
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          install-mode: binary
+          version: v2.1.6
+          args: --timeout=3m
+      - run: make fmt-check
+      - run: make test
+      - run: make race
+      - run: make config-check
+      - run: make env-example-check
+      - run: make lint
+      - run: make security
+      - run: make bench
+
+  docs:
+    name: Documentation quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+        working-directory: docs
+      - run: npm run build
+        working-directory: docs
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: "**/*.md"
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --verbose --no-progress --exclude '127\\.0\\.0\\.1' --exclude 'localhost' '**/*.md' 'README.md'
+          fail: true
+
+  docker-smoke:
+    name: Docker smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        run: docker build --tag go-feather-route:ci --build-arg VERSION=ci .
+      - name: Start image
+        run: |
+          docker run -d --name go-feather-route-ci -p 4000:4000 \
+            -e GOFEATHERROUTE_API_KEY=ci-key go-feather-route:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4000/health/liveliness; then exit 0; fi
+            sleep 1
+          done
+          docker logs go-feather-route-ci
+          exit 1
+      - if: always()
+        run: docker rm -f go-feather-route-ci || true

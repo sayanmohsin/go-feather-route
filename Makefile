@@ -49,6 +49,7 @@ config-check:
 
 env-example-check:
 	go test ./internal/config -run TestEnvironmentExample
+	./scripts/check-env-example.sh
 
 bench:
 	go test -bench=. -benchmem ./...
