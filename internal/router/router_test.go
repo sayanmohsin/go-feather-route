@@ -74,6 +74,45 @@ func TestChatRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestEmbeddingsProxiesBatchRequestAndUsage(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/embeddings" {
+			t.Fatalf("provider request = %s %s", request.Method, request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer provider-secret" {
+			t.Fatal("provider authorization was not forwarded")
+		}
+		if request.Header.Get("X-Request-ID") != "embedding-request" {
+			t.Fatalf("request id = %q", request.Header.Get("X-Request-ID"))
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"object":"list","data":[{"index":0,"embedding":[1,0]},{"index":1,"embedding":[0,1]}],"model":"embedding-test","usage":{"prompt_tokens":8,"total_tokens":8}}`))
+	}))
+	defer provider.Close()
+
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Auth:      config.AuthConfig{APIKey: "gateway-secret"},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"embedding-test": "openai"},
+	}
+	server := httptest.NewServer(NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+
+	request := httptest.NewRequest(http.MethodPost, server.URL+"/v1/embeddings", strings.NewReader(`{"model":"embedding-test","input":["first","second"]}`))
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	request.Header.Set("X-Request-ID", "embedding-request")
+	response := httptest.NewRecorder()
+	server.Config.Handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"total_tokens":8`) {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
 func TestChatStreamsProviderResponse(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "text/event-stream")

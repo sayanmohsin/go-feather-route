@@ -33,6 +33,33 @@ func TestClientRetriesRetryableNonStreamingResponse(t *testing.T) {
 	}
 }
 
+func TestClientRetriesEmbeddingResponse(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/embeddings" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		attempts++
+		if attempts == 1 {
+			response.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"object":"list","data":[],"usage":{"prompt_tokens":3,"total_tokens":3}}`))
+	}))
+	defer server.Close()
+
+	client := Client{Name: "test", BaseURL: server.URL + "/v1", APIKey: "secret", HTTPClient: server.Client()}
+	result, err := client.Embedding(context.Background(), []byte(`{"model":"embedding-test","input":["hello"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = result.Body.Close() }()
+	if attempts != 2 || result.StatusCode != http.StatusOK {
+		t.Fatalf("attempts=%d status=%d", attempts, result.StatusCode)
+	}
+}
+
 func TestClientDoesNotRetryStreaming(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {

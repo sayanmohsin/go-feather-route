@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Client sends OpenAI-compatible chat requests to one provider.
+// Client sends OpenAI-compatible requests to one provider.
 type Client struct {
 	Name       string
 	BaseURL    string
@@ -69,14 +69,54 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 	return Response{}, lastErr
 }
 
+// Embedding sends an OpenAI-compatible embeddings request and transfers
+// response-body ownership to the caller.
+func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
+	if c.APIKey == "" {
+		return Response{}, fmt.Errorf("provider %s is not configured: API key is empty", c.Name)
+	}
+	endpoint := strings.TrimRight(c.BaseURL, "/") + "/embeddings"
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		response, err := c.doJSON(ctx, endpoint, body, "application/json")
+		if err != nil {
+			lastErr = err
+			if attempt == 0 && ctx.Err() == nil {
+				continue
+			}
+			return Response{}, err
+		}
+		response.Attempts = attempt + 1
+		if response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests {
+			return response, nil
+		}
+		if attempt == 0 {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			select {
+			case <-time.After(100 * time.Millisecond):
+			case <-ctx.Done():
+				return Response{}, ctx.Err()
+			}
+			continue
+		}
+		return response, nil
+	}
+	return Response{}, lastErr
+}
+
 func (c Client) doChat(ctx context.Context, endpoint string, body []byte) (Response, error) {
+	return c.doJSON(ctx, endpoint, body, "application/json, text/event-stream")
+}
+
+func (c Client) doJSON(ctx context.Context, endpoint string, body []byte, accept string) (Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Response{}, fmt.Errorf("create provider request: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+c.APIKey)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Accept", accept)
 	if requestID, ok := ctx.Value(requestIDContextKey{}).(string); ok && requestID != "" {
 		request.Header.Set("X-Request-ID", requestID)
 	}

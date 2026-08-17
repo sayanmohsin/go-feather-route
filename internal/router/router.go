@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("POST /v1/chat/completions", s.chat)
+	mux.HandleFunc("POST /v1/embeddings", s.embeddings)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		started := time.Now()
 		tracked := &metricsResponseWriter{ResponseWriter: response}
@@ -227,6 +228,47 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.streamResponse(response, upstream)
 		return
 	}
+	copyHeaders(response.Header(), upstream.Header)
+	response.WriteHeader(upstream.StatusCode)
+	_, _ = io.Copy(response, upstream.Body)
+}
+
+func (s *Server) embeddings(response http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(response, request.Body, s.config.Server.MaxBodyBytes)
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
+		s.writeError(response, http.StatusRequestEntityTooLarge, "request body is too large or unreadable")
+		return
+	}
+	var envelope struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Model == "" {
+		s.writeError(response, http.StatusBadRequest, "request must contain a valid model")
+		return
+	}
+	client, err := s.clientFor(envelope.Model)
+	if err != nil {
+		s.writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	select {
+	case s.semaphore <- struct{}{}:
+		defer func() { <-s.semaphore }()
+	case <-request.Context().Done():
+		s.writeError(response, http.StatusRequestTimeout, "request canceled")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), s.config.Server.RequestTimeout)
+	defer cancel()
+	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
+	upstream, err := client.Embedding(ctx, body)
+	if err != nil {
+		s.writeError(response, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer func() { _ = upstream.Body.Close() }()
+	s.retries.Add(retryCount(upstream.Attempts))
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = io.Copy(response, upstream.Body)
