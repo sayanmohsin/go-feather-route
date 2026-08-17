@@ -171,9 +171,9 @@ func TestChatStreamsProviderResponse(t *testing.T) {
 		response.Header().Set("Content-Type", "text/event-stream")
 		response.WriteHeader(http.StatusOK)
 		flusher := response.(http.Flusher)
-		_, _ = response.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n"))
+		_, _ = response.Write([]byte(": keep-alive\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
 		flusher.Flush()
-		_, _ = response.Write([]byte("data: [DONE]\n\n"))
+		_, _ = response.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n"))
 	}))
 	defer provider.Close()
 
@@ -197,9 +197,45 @@ func TestChatStreamsProviderResponse(t *testing.T) {
 	if response.Header().Get("Cache-Control") != "no-cache, no-transform" || response.Header().Get("X-Accel-Buffering") != "no" {
 		t.Fatalf("stream headers = cache=%q buffering=%q", response.Header().Get("Cache-Control"), response.Header().Get("X-Accel-Buffering"))
 	}
-	if !strings.Contains(response.Body.String(), "[DONE]") {
+	if !strings.Contains(response.Body.String(), ": keep-alive") || !strings.Contains(response.Body.String(), `"total_tokens":3`) || !strings.Contains(response.Body.String(), "[DONE]") {
 		t.Fatalf("body = %s", response.Body.String())
 	}
+}
+
+func TestRequestBodyLimitReturnsOpenAIError(t *testing.T) {
+	cfg := config.Config{
+		Server: config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 8, MaxConcurrentRequests: 1},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model"}`))
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge || !strings.Contains(response.Body.String(), "go_feather_route_error") {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestEmbeddingsPreserveBatchOrdering(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"object":"list","data":[{"index":1,"embedding":[0,1]},{"index":0,"embedding":[1,0]}],"model":"embedding-test"}`))
+	}))
+	defer provider.Close()
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"embedding-test": "openai"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embedding-test","input":["first","second"]}`))
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Index(body, `"index":1`) < strings.Index(body, `"index":0`) {
+		return
+	}
+	t.Fatalf("provider response was not passed through with its indexes: %s", body)
 }
 
 func TestOperationalEndpoints(t *testing.T) {
