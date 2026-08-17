@@ -34,6 +34,7 @@ type Server struct {
 	streamsTotal  atomic.Uint64
 	retries       atomic.Uint64
 	bytes         atomic.Uint64
+	durationMs    atomic.Uint64
 }
 
 // NewServer constructs a router server from validated configuration.
@@ -81,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 		tracked := &metricsResponseWriter{ResponseWriter: response}
 		s.active.Add(1)
 		defer func() {
+			duration := time.Since(started)
 			s.active.Add(-1)
 			s.requests.Add(1)
 			if tracked.statusCode >= http.StatusBadRequest {
@@ -89,7 +91,11 @@ func (s *Server) Handler() http.Handler {
 			if tracked.bytes > 0 {
 				s.bytes.Add(uint64(tracked.bytes)) // #nosec G115 -- bytes is checked positive and uint64 has a wider positive range.
 			}
-			s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "request_id", request.Header.Get("X-Request-ID"), "status", tracked.statusCode, "bytes", tracked.bytes, "duration_ms", time.Since(started).Milliseconds())
+			durationMs := duration.Milliseconds()
+			if durationMs > 0 {
+				s.durationMs.Add(uint64(durationMs)) // #nosec G115 -- duration is non-negative and bounded by the process lifetime.
+			}
+			s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "request_id", request.Header.Get("X-Request-ID"), "status", tracked.statusCode, "bytes", tracked.bytes, "duration_ms", durationMs)
 		}()
 		requestID := requestID(request.Header.Get("X-Request-ID"))
 		request.Header.Set("X-Request-ID", requestID)
@@ -138,6 +144,7 @@ func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 		"streams_total": s.streamsTotal.Load(),
 		"retries":       s.retries.Load(),
 		"bytes":         s.bytes.Load(),
+		"duration_ms":   s.durationMs.Load(),
 	})
 }
 
@@ -180,6 +187,7 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_total %d\n", s.streamsTotal.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_retries_total %d\n", s.retries.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_response_bytes_total %d\n", s.bytes.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_request_duration_milliseconds_total %d\n", s.durationMs.Load())
 }
 
 func (s *Server) chat(response http.ResponseWriter, request *http.Request) {

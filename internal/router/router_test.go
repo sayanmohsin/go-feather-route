@@ -24,6 +24,13 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 		if request.Header.Get("X-Request-ID") != "request-123" {
 			t.Fatalf("request id = %q", request.Header.Get("X-Request-ID"))
 		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != `{"model":"test-model","messages":[],"response_format":{"type":"json_object"}}` {
+			t.Fatalf("provider body = %s", body)
+		}
 		response.Header().Set("Content-Type", "application/json")
 		response.Header().Set("X-Request-ID", "provider-id")
 		response.Header().Set("X-RateLimit-Limit", "10")
@@ -40,7 +47,7 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 	server := httptest.NewServer(NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
 	defer server.Close()
 
-	request := httptest.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[]}`))
+	request := httptest.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[],"response_format":{"type":"json_object"}}`))
 	request.Header.Set("Authorization", "Bearer gateway-secret")
 	request.Header.Set("X-Request-ID", "request-123")
 	request.Header.Set("Content-Type", "application/json")
