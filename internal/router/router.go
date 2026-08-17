@@ -232,6 +232,10 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		defer s.activeStreams.Add(-1)
 	}
 	s.retries.Add(retryCount(upstream.Attempts))
+	if upstream.StatusCode >= http.StatusBadRequest {
+		s.copyUpstreamError(response, upstream)
+		return
+	}
 	if envelope.Stream {
 		s.streamResponse(response, upstream)
 		return
@@ -277,6 +281,16 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	}
 	defer func() { _ = upstream.Body.Close() }()
 	s.retries.Add(retryCount(upstream.Attempts))
+	if upstream.StatusCode >= http.StatusBadRequest {
+		s.copyUpstreamError(response, upstream)
+		return
+	}
+	copyHeaders(response.Header(), upstream.Header)
+	response.WriteHeader(upstream.StatusCode)
+	_, _ = io.Copy(response, upstream.Body)
+}
+
+func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provider.Response) {
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = io.Copy(response, upstream.Body)
