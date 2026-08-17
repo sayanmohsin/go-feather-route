@@ -34,6 +34,12 @@ trap cleanup EXIT
 gateway_id="$("${compose[@]}" ps --quiet "$service")"
 fake_id="$("${compose[@]}" ps --quiet fake-provider)"
 gateway_url="http://127.0.0.1:${BENCHMARK_HOST_PORT}"
+gateway_image="$("${compose[@]}" images -q "$service" 2>/dev/null || true)"
+gateway_architecture="$("${compose[@]}" exec -T "$service" uname -m 2>/dev/null || true)"
+printf '{"gateway":"%s","operation":"%s","streaming":%s,"requests":%s,"concurrency":%s,"host_architecture":"%s","gateway_image_id":"%s","gateway_architecture":"%s","native_or_emulated":"%s"}\n' \
+  "$target" "${BENCHMARK_OPERATION:-chat}" "${BENCHMARK_STREAMING:-false}" "${BENCHMARK_REQUESTS:-32}" "${BENCHMARK_CONCURRENCY:-1}" \
+  "$(uname -m)" "$gateway_image" "$gateway_architecture" "${BENCHMARK_EXECUTION_MODE:-unspecified}" \
+  >"$result_dir/metadata.json"
 
 for attempt in $(seq 1 60); do
   if curl --silent --fail "$gateway_url/health/liveliness" >/dev/null; then
@@ -96,6 +102,7 @@ go run ./benchmarks/cmd/runner \
   -gateway "$target" \
   -requests "${BENCHMARK_REQUESTS:-32}" \
   -concurrency "${BENCHMARK_CONCURRENCY:-1}" \
+  -operation "${BENCHMARK_OPERATION:-chat}" \
   -stream="${BENCHMARK_STREAMING:-false}" \
   -output "$result_dir/requests.json" &
 runner_pid=$!

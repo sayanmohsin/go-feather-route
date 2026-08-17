@@ -27,6 +27,7 @@ type report struct {
 	Gateway     string   `json:"gateway"`
 	URL         string   `json:"url"`
 	Model       string   `json:"model"`
+	Operation   string   `json:"operation"`
 	Requests    int      `json:"requests"`
 	Concurrency int      `json:"concurrency"`
 	Streaming   bool     `json:"streaming"`
@@ -54,9 +55,10 @@ func main() {
 	requests := flag.Int("requests", 32, "number of requests")
 	concurrency := flag.Int("concurrency", 1, "maximum concurrent requests")
 	streaming := flag.Bool("stream", false, "use SSE streaming")
+	operation := flag.String("operation", "chat", "operation: chat or embeddings")
 	output := flag.String("output", "benchmark.json", "output JSON path")
 	flag.Parse()
-	if *requests < 1 || *concurrency < 1 {
+	if *requests < 1 || *concurrency < 1 || (*operation != "chat" && *operation != "embeddings") || (*operation == "embeddings" && *streaming) {
 		fatal("requests and concurrency must be positive")
 	}
 
@@ -70,7 +72,7 @@ func main() {
 		go func() {
 			defer wait.Done()
 			for index := range jobs {
-				results[index] = request(context.Background(), client, *url, *key, *model, *streaming)
+				results[index] = request(context.Background(), client, *url, *key, *model, *operation, *streaming)
 			}
 		}()
 	}
@@ -81,7 +83,7 @@ func main() {
 	wait.Wait()
 
 	outputReport := report{
-		Gateway: *gateway, URL: *url, Model: *model, Requests: *requests, Concurrency: *concurrency,
+		Gateway: *gateway, URL: *url, Model: *model, Operation: *operation, Requests: *requests, Concurrency: *concurrency,
 		Streaming: *streaming, StartedAt: started.UTC().Format(time.RFC3339), Results: results,
 		Summary: summarize(results, time.Since(started)),
 	}
@@ -95,9 +97,14 @@ func main() {
 	fmt.Printf("%s p50=%.2fms p95=%.2fms p99=%.2fms rps=%.2f errors=%d\n", *gateway, outputReport.Summary.P50MS, outputReport.Summary.P95MS, outputReport.Summary.P99MS, outputReport.Summary.RequestsPerSec, outputReport.Summary.Errors)
 }
 
-func request(ctx context.Context, client *http.Client, baseURL, key, model string, streaming bool) result {
+func request(ctx context.Context, client *http.Client, baseURL, key, model, operation string, streaming bool) result {
+	endpoint := "/v1/chat/completions"
 	body := fmt.Sprintf(`{"model":%q,"stream":%t,"max_tokens":64,"messages":[{"role":"user","content":"Return a short benchmark response."}]}`, model, streaming)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/chat/completions", bytes.NewBufferString(body))
+	if operation == "embeddings" {
+		endpoint = "/v1/embeddings"
+		body = fmt.Sprintf(`{"model":%q,"input":["Return a short benchmark embedding.","Measure deterministic routing."]}`, model)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+endpoint, bytes.NewBufferString(body))
 	if err != nil {
 		return result{Error: err.Error()}
 	}

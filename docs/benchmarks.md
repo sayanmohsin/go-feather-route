@@ -31,14 +31,16 @@ make benchmark-litellm
 ```
 
 The harness uses the LiteLLM image digest pinned by the Cloud deployment and
-does not call a paid model. It records sanitized request results under
-`benchmarks/results/` and captures Docker resource samples every 250 ms.
+does not call a paid model. It records sanitized request results and workload
+metadata under `benchmarks/results/` and captures Docker resource samples every
+250 ms.
 
 Configure the workload:
 
 ```bash
 BENCHMARK_REQUESTS=256 BENCHMARK_CONCURRENCY=8 make benchmark-go
 BENCHMARK_REQUESTS=256 BENCHMARK_CONCURRENCY=8 BENCHMARK_STREAMING=true make benchmark-litellm
+BENCHMARK_OPERATION=embeddings BENCHMARK_REQUESTS=256 BENCHMARK_CONCURRENCY=8 make benchmark-go
 ```
 
 ## Measurements
@@ -49,6 +51,7 @@ Each run records:
 - p50, p95, and p99 latency;
 - throughput, errors, and response bytes;
 - streaming time-to-first-byte;
+- embedding batch latency and response ordering;
 - Docker CPU percentage and memory usage/limit;
 - network I/O, block I/O, and process count;
 - host memory where available;
