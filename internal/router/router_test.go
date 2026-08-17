@@ -312,6 +312,27 @@ func TestMetricsAccountForUnauthorizedRequests(t *testing.T) {
 	}
 }
 
+func TestMetricsExposeProviderAndModelLabels(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte(`{"id":"chat","choices":[]}`))
+	}))
+	defer provider.Close()
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	server := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[]}`))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	metrics := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), `go_feather_route_upstream_requests_total{provider="openai",model="test-model"} 1`) {
+		t.Fatalf("metrics = %s", metrics.Body.String())
+	}
+}
+
 func TestStreamingCancellationReachesProvider(t *testing.T) {
 	providerCanceled := make(chan struct{})
 	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

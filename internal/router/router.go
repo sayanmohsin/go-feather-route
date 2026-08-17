@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,19 @@ type Server struct {
 	retries       atomic.Uint64
 	bytes         atomic.Uint64
 	durationMs    atomic.Uint64
+	routeMu       sync.Mutex
+	routeStats    map[routeKey]*routeMetric
+}
+
+type routeKey struct {
+	provider string
+	model    string
+}
+
+type routeMetric struct {
+	requests atomic.Uint64
+	errors   atomic.Uint64
+	retries  atomic.Uint64
 }
 
 // NewServer constructs a router server from validated configuration.
@@ -57,10 +71,11 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 		}
 	}
 	return &Server{
-		config:    cfg,
-		providers: providers,
-		semaphore: make(chan struct{}, cfg.Server.MaxConcurrentRequests),
-		logger:    logger,
+		config:     cfg,
+		providers:  providers,
+		semaphore:  make(chan struct{}, cfg.Server.MaxConcurrentRequests),
+		logger:     logger,
+		routeStats: make(map[routeKey]*routeMetric),
 	}
 }
 
@@ -188,6 +203,18 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_retries_total %d\n", s.retries.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_response_bytes_total %d\n", s.bytes.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_request_duration_milliseconds_total %d\n", s.durationMs.Load())
+	s.routeMu.Lock()
+	defer s.routeMu.Unlock()
+	for key, metric := range s.routeStats {
+		labels := fmt.Sprintf(`provider="%s",model="%s"`, escapeMetricLabel(key.provider), escapeMetricLabel(key.model))
+		_, _ = fmt.Fprintf(response, "go_feather_route_upstream_requests_total{%s} %d\n", labels, metric.requests.Load())
+		_, _ = fmt.Fprintf(response, "go_feather_route_upstream_errors_total{%s} %d\n", labels, metric.errors.Load())
+		_, _ = fmt.Fprintf(response, "go_feather_route_upstream_retries_total{%s} %d\n", labels, metric.retries.Load())
+	}
+}
+
+func escapeMetricLabel(value string) string {
+	return strings.NewReplacer(`\\`, `\\\\`, `"`, `\\"`, "\n", `\\n`).Replace(value)
 }
 
 func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
@@ -226,6 +253,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
+	s.recordRouteMetric(client.Name, envelope.Model, upstream.StatusCode, upstream.Attempts)
 	if envelope.Stream {
 		s.activeStreams.Add(1)
 		s.streamsTotal.Add(1)
@@ -280,6 +308,7 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
+	s.recordRouteMetric(client.Name, envelope.Model, upstream.StatusCode, upstream.Attempts)
 	s.retries.Add(retryCount(upstream.Attempts))
 	if upstream.StatusCode >= http.StatusBadRequest {
 		s.copyUpstreamError(response, upstream)
@@ -288,6 +317,22 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = io.Copy(response, upstream.Body)
+}
+
+func (s *Server) recordRouteMetric(providerName, model string, status, attempts int) {
+	s.routeMu.Lock()
+	key := routeKey{provider: providerName, model: model}
+	metric := s.routeStats[key]
+	if metric == nil {
+		metric = &routeMetric{}
+		s.routeStats[key] = metric
+	}
+	s.routeMu.Unlock()
+	metric.requests.Add(1)
+	if status >= http.StatusBadRequest {
+		metric.errors.Add(1)
+	}
+	metric.retries.Add(retryCount(attempts))
 }
 
 func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provider.Response) {
