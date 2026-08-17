@@ -29,8 +29,12 @@ type ServerConfig struct {
 	LogLevel              string        `yaml:"log_level"`
 	RequestTimeout        time.Duration `yaml:"-"`
 	RequestTimeoutText    string        `yaml:"request_timeout"`
+	StreamIdleTimeout     time.Duration `yaml:"-"`
+	StreamIdleTimeoutText string        `yaml:"stream_idle_timeout"`
 	MaxBodyBytes          int64         `yaml:"max_body_bytes"`
+	MaxResponseBytes      int64         `yaml:"max_response_bytes"`
 	MaxConcurrentRequests int           `yaml:"max_concurrent_requests"`
+	MaxConcurrentStreams  int           `yaml:"max_concurrent_streams"`
 }
 
 // AuthConfig controls gateway authentication.
@@ -95,8 +99,11 @@ func defaults() Config {
 			Address:               ":4000",
 			LogLevel:              "info",
 			RequestTimeoutText:    "60s",
+			StreamIdleTimeoutText: "30s",
 			MaxBodyBytes:          1 << 20,
+			MaxResponseBytes:      8 << 20,
 			MaxConcurrentRequests: 16,
+			MaxConcurrentStreams:  4,
 		},
 		Auth: AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
 		Providers: map[string]ProviderConfig{
@@ -117,6 +124,9 @@ func applyEnvironment(config *Config, env map[string]string) error {
 	if value := env["GOFEATHERROUTE_REQUEST_TIMEOUT"]; value != "" {
 		config.Server.RequestTimeoutText = value
 	}
+	if value := env["GOFEATHERROUTE_STREAM_IDLE_TIMEOUT"]; value != "" {
+		config.Server.StreamIdleTimeoutText = value
+	}
 	if value := env["GOFEATHERROUTE_MAX_BODY_BYTES"]; value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
@@ -124,12 +134,26 @@ func applyEnvironment(config *Config, env map[string]string) error {
 		}
 		config.Server.MaxBodyBytes = parsed
 	}
+	if value := env["GOFEATHERROUTE_MAX_RESPONSE_BYTES"]; value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("GOFEATHERROUTE_MAX_RESPONSE_BYTES must be an integer: %w", err)
+		}
+		config.Server.MaxResponseBytes = parsed
+	}
 	if value := env["GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS"]; value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS must be an integer: %w", err)
 		}
 		config.Server.MaxConcurrentRequests = parsed
+	}
+	if value := env["GOFEATHERROUTE_MAX_CONCURRENT_STREAMS"]; value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("GOFEATHERROUTE_MAX_CONCURRENT_STREAMS must be an integer: %w", err)
+		}
+		config.Server.MaxConcurrentStreams = parsed
 	}
 	config.Auth.APIKey = env[config.Auth.APIKeyEnv]
 	config.AllowInsecureHTTP = env["GOFEATHERROUTE_ALLOW_INSECURE_HTTP"] == "1" || env["GOFEATHERROUTE_ALLOW_INSECURE_HTTP"] == "true"
@@ -147,14 +171,25 @@ func validate(config *Config, env map[string]string) error {
 	if config.Server.MaxBodyBytes <= 0 {
 		return errors.New("server.max_body_bytes must be positive")
 	}
+	if config.Server.MaxResponseBytes <= 0 {
+		return errors.New("server.max_response_bytes must be positive")
+	}
 	if config.Server.MaxConcurrentRequests <= 0 {
 		return errors.New("server.max_concurrent_requests must be positive")
+	}
+	if config.Server.MaxConcurrentStreams <= 0 {
+		return errors.New("server.max_concurrent_streams must be positive")
 	}
 	parsed, err := time.ParseDuration(config.Server.RequestTimeoutText)
 	if err != nil || parsed <= 0 {
 		return fmt.Errorf("server.request_timeout must be a positive duration: %q", config.Server.RequestTimeoutText)
 	}
 	config.Server.RequestTimeout = parsed
+	streamIdleTimeout, err := time.ParseDuration(config.Server.StreamIdleTimeoutText)
+	if err != nil || streamIdleTimeout <= 0 {
+		return fmt.Errorf("server.stream_idle_timeout must be a positive duration: %q", config.Server.StreamIdleTimeoutText)
+	}
+	config.Server.StreamIdleTimeout = streamIdleTimeout
 	if !strings.Contains(config.Server.LogLevel, "debug") && config.Server.LogLevel != "info" && config.Server.LogLevel != "warn" && config.Server.LogLevel != "error" {
 		return fmt.Errorf("server.log_level must be debug, info, warn, or error: %q", config.Server.LogLevel)
 	}

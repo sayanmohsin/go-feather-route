@@ -24,20 +24,21 @@ import (
 
 // Server routes authenticated client requests to configured providers.
 type Server struct {
-	config        config.Config
-	providers     map[string]provider.Client
-	semaphore     chan struct{}
-	logger        *slog.Logger
-	requests      atomic.Uint64
-	errors        atomic.Uint64
-	active        atomic.Int64
-	activeStreams atomic.Int64
-	streamsTotal  atomic.Uint64
-	retries       atomic.Uint64
-	bytes         atomic.Uint64
-	durationMs    atomic.Uint64
-	routeMu       sync.Mutex
-	routeStats    map[routeKey]*routeMetric
+	config          config.Config
+	providers       map[string]provider.Client
+	semaphore       chan struct{}
+	streamSemaphore chan struct{}
+	logger          *slog.Logger
+	requests        atomic.Uint64
+	errors          atomic.Uint64
+	active          atomic.Int64
+	activeStreams   atomic.Int64
+	streamsTotal    atomic.Uint64
+	retries         atomic.Uint64
+	bytes           atomic.Uint64
+	durationMs      atomic.Uint64
+	routeMu         sync.Mutex
+	routeStats      map[routeKey]*routeMetric
 }
 
 type routeKey struct {
@@ -53,6 +54,18 @@ type routeMetric struct {
 
 // NewServer constructs a router server from validated configuration.
 func NewServer(cfg config.Config, logger *slog.Logger) *Server {
+	if cfg.Server.MaxConcurrentRequests <= 0 {
+		cfg.Server.MaxConcurrentRequests = 16
+	}
+	if cfg.Server.MaxConcurrentStreams <= 0 {
+		cfg.Server.MaxConcurrentStreams = 4
+	}
+	if cfg.Server.MaxResponseBytes <= 0 {
+		cfg.Server.MaxResponseBytes = 8 << 20
+	}
+	if cfg.Server.StreamIdleTimeout <= 0 {
+		cfg.Server.StreamIdleTimeout = 30 * time.Second
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.MaxIdleConns = 100
@@ -71,11 +84,12 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 		}
 	}
 	return &Server{
-		config:     cfg,
-		providers:  providers,
-		semaphore:  make(chan struct{}, cfg.Server.MaxConcurrentRequests),
-		logger:     logger,
-		routeStats: make(map[routeKey]*routeMetric),
+		config:          cfg,
+		providers:       providers,
+		semaphore:       make(chan struct{}, cfg.Server.MaxConcurrentRequests),
+		streamSemaphore: make(chan struct{}, cfg.Server.MaxConcurrentStreams),
+		logger:          logger,
+		routeStats:      make(map[routeKey]*routeMetric),
 	}
 }
 
@@ -237,9 +251,13 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
+	concurrency := s.semaphore
+	if envelope.Stream {
+		concurrency = s.streamSemaphore
+	}
 	select {
-	case s.semaphore <- struct{}{}:
-		defer func() { <-s.semaphore }()
+	case concurrency <- struct{}{}:
+		defer func() { <-concurrency }()
 	case <-request.Context().Done():
 		s.writeError(response, http.StatusRequestTimeout, "request canceled")
 		return
@@ -270,7 +288,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
-	_, _ = io.Copy(response, upstream.Body)
+	_, _ = io.Copy(response, io.LimitReader(upstream.Body, s.config.Server.MaxResponseBytes))
 }
 
 func (s *Server) embeddings(response http.ResponseWriter, request *http.Request) {
@@ -292,9 +310,10 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
+	concurrency := s.semaphore
 	select {
-	case s.semaphore <- struct{}{}:
-		defer func() { <-s.semaphore }()
+	case concurrency <- struct{}{}:
+		defer func() { <-concurrency }()
 	case <-request.Context().Done():
 		s.writeError(response, http.StatusRequestTimeout, "request canceled")
 		return
@@ -316,7 +335,7 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
-	_, _ = io.Copy(response, upstream.Body)
+	_, _ = io.Copy(response, io.LimitReader(upstream.Body, s.config.Server.MaxResponseBytes))
 }
 
 func (s *Server) recordRouteMetric(providerName, model string, status, attempts int) {
@@ -338,7 +357,7 @@ func (s *Server) recordRouteMetric(providerName, model string, status, attempts 
 func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provider.Response) {
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
-	_, _ = io.Copy(response, upstream.Body)
+	_, _ = io.Copy(response, io.LimitReader(upstream.Body, s.config.Server.MaxResponseBytes))
 }
 
 func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) {
@@ -353,7 +372,7 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	flusher, canFlush := response.(http.Flusher)
 	buffer := make([]byte, 32*1024)
 	for {
-		count, err := upstream.Body.Read(buffer)
+		count, err := readWithIdleTimeout(upstream.Body, buffer, s.config.Server.StreamIdleTimeout)
 		if count > 0 {
 			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
 				return
@@ -365,6 +384,29 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 		if err != nil {
 			return
 		}
+	}
+}
+
+func readWithIdleTimeout(reader io.Reader, buffer []byte, timeout time.Duration) (int, error) {
+	if timeout <= 0 {
+		return reader.Read(buffer)
+	}
+	type readResult struct {
+		count int
+		err   error
+	}
+	resultCh := make(chan readResult, 1)
+	go func() {
+		count, err := reader.Read(buffer)
+		resultCh <- readResult{count: count, err: err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-resultCh:
+		return result.count, result.err
+	case <-timer.C:
+		return 0, context.DeadlineExceeded
 	}
 }
 

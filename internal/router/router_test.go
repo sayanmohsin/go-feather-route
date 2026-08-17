@@ -372,3 +372,31 @@ func TestStreamingCancellationReachesProvider(t *testing.T) {
 		t.Fatal("provider request was not canceled")
 	}
 }
+
+func TestStreamingIdleTimeoutStopsStalledProvider(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.WriteHeader(http.StatusOK)
+		response.(http.Flusher).Flush()
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer provider.Close()
+
+	cfg := config.Config{
+		Server: config.ServerConfig{
+			RequestTimeout:        time.Second,
+			StreamIdleTimeout:     10 * time.Millisecond,
+			MaxBodyBytes:          1024,
+			MaxConcurrentRequests: 1,
+			MaxConcurrentStreams:  1,
+		},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"messages":[]}`))
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+}
