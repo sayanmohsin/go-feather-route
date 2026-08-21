@@ -16,6 +16,10 @@ type chatRequest struct {
 	Stream bool `json:"stream"`
 }
 
+type embeddingRequest struct {
+	Input json.RawMessage `json:"input"`
+}
+
 func main() {
 	port := os.Getenv("FAKE_PROVIDER_PORT")
 	if port == "" {
@@ -50,7 +54,47 @@ func handler(delay time.Duration) http.Handler {
 		response.Header().Set("Content-Type", "application/json")
 		_, _ = response.Write([]byte(`{"id":"fake-benchmark","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"benchmark response"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}`))
 	})
+	mux.HandleFunc("POST /v1/embeddings", func(response http.ResponseWriter, request *http.Request) {
+		defer func() { _ = request.Body.Close() }()
+		var input embeddingRequest
+		if err := json.NewDecoder(io.LimitReader(request.Body, 1<<20)).Decode(&input); err != nil {
+			http.Error(response, "invalid request", http.StatusBadRequest)
+			return
+		}
+		count, err := embeddingInputCount(input.Input)
+		if err != nil || count == 0 {
+			http.Error(response, "invalid embedding input", http.StatusBadRequest)
+			return
+		}
+		data := make([]map[string]any, count)
+		for index := range count {
+			data[index] = map[string]any{
+				"object":    "embedding",
+				"index":     index,
+				"embedding": []float64{float64(index + 1), float64(count)},
+			}
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"object": "list",
+			"data":   data,
+			"model":  "benchmark-model",
+			"usage":  map[string]int{"prompt_tokens": count * 4, "total_tokens": count * 4},
+		})
+	})
 	return mux
+}
+
+func embeddingInputCount(input json.RawMessage) (int, error) {
+	var batch []string
+	if err := json.Unmarshal(input, &batch); err == nil {
+		return len(batch), nil
+	}
+	var single string
+	if err := json.Unmarshal(input, &single); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
 func streamResponse(response http.ResponseWriter, delay time.Duration) {
