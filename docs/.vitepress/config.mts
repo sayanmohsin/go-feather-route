@@ -46,6 +46,8 @@ export default withMermaid({
           { text: "Health", link: "/health" },
           { text: "Performance", link: "/performance" },
           { text: "Benchmarks", link: "/benchmarks" },
+          { text: "LiteLLM compatibility", link: "/litellm-compatibility" },
+          { text: "Compatibility gaps", link: "/compatibility-gaps" },
           { text: "Security", link: "/security" },
           { text: "Troubleshooting", link: "/troubleshooting" },
         ],

@@ -129,6 +129,8 @@ capabilities. The standalone router remains useful without Thingd.
 - [Health and operations](docs/health.md)
 - [Docker deployment](docs/docker.md)
 - [Benchmarks](docs/benchmarks.md)
+- [LiteLLM compatibility contract](docs/litellm-compatibility.md)
+- [Compatibility gap matrix](docs/compatibility-gaps.md)
 - [Optional Thingd MCP connector](docs/thingd-mcp.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
