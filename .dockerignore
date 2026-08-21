@@ -3,5 +3,8 @@
 bin
 coverage.out
 docs/node_modules
+docs
+benchmarks/results
+**/*_test.go
 .env
 *.md
