@@ -87,6 +87,23 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '413': { description: Request body is too large. }
         '502': { description: Provider request failed. }
+  /v1/embeddings:
+    post:
+      operationId: createEmbedding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmbeddingRequest' }
+      responses:
+        '200':
+          description: Ordered embedding vectors and optional provider usage.
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/EmbeddingResponse' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { description: Request body is too large. }
+        '502': { description: Provider request failed. }
 components:
   securitySchemes:
     bearerAuth:
@@ -138,7 +155,42 @@ components:
         model: { type: string }
         messages: { type: array, items: { type: object } }
         stream: { type: boolean, default: false }
+        max_tokens: { type: integer, minimum: 1 }
+        response_format:
+          type: object
+          properties:
+            type: { type: string, enum: [text, json_object] }
       additionalProperties: true
+    EmbeddingRequest:
+      type: object
+      required: [model, input]
+      properties:
+        model: { type: string }
+        input:
+          oneOf:
+            - { type: string }
+            - type: array
+              items: { type: string }
+      additionalProperties: true
+    EmbeddingResponse:
+      type: object
+      required: [object, data]
+      properties:
+        object: { type: string, example: list }
+        model: { type: string }
+        data:
+          type: array
+          items:
+            type: object
+            required: [index, embedding]
+            properties:
+              index: { type: integer, minimum: 0 }
+              embedding:
+                type: array
+                items: { type: number }
+        usage:
+          type: object
+          additionalProperties: { type: integer }
     ErrorResponse:
       type: object
       required: [error]

@@ -48,6 +48,20 @@ small allowlist; hop-by-hop and authorization headers are never returned.
 
 Returns configured model aliases in OpenAI list format.
 
+### `POST /v1/embeddings`
+
+Accepts an OpenAI-compatible embedding request. `model` and `input` are
+required; `input` may be a string or an array of strings. The request is
+forwarded to the selected provider and the provider response, including usage
+metadata and vector indexes, is preserved within the configured response limit.
+
+```bash
+curl http://127.0.0.1:4000/v1/embeddings \
+  -H 'Authorization: Bearer gateway-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"text-embedding-3-small","input":["first record","second record"]}'
+```
+
 ### `POST /v1/chat/completions`
 
 Accepts an OpenAI-compatible chat request. `model` is required. The body is
@@ -73,6 +87,5 @@ The gateway uses `401` for authentication failures, `400` for invalid input,
 `413` for oversized bodies, `502` for upstream failures, and `503` for
 degraded readiness.
 
-Embeddings, multimodal requests, per-tenant quotas, and richer metrics are
-long-term directions. They are not advertised as available routes until their
-implementation and OpenAPI schemas are shipped together.
+Multimodal requests and per-tenant quotas remain long-term directions. Usage
+accounting, quotas, reservations, and tenant policy stay outside the gateway.

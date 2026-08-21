@@ -99,7 +99,7 @@ func main() {
 
 func request(ctx context.Context, client *http.Client, baseURL, key, model, operation string, streaming bool) result {
 	endpoint := "/v1/chat/completions"
-	body := fmt.Sprintf(`{"model":%q,"stream":%t,"max_tokens":64,"messages":[{"role":"user","content":"Return a short benchmark response."}]}`, model, streaming)
+	body := fmt.Sprintf(`{"model":%q,"stream":%t,"max_tokens":64,"response_format":{"type":"json_object"},"messages":[{"role":"user","content":"Return a short benchmark response as JSON."}]}`, model, streaming)
 	if operation == "embeddings" {
 		endpoint = "/v1/embeddings"
 		body = fmt.Sprintf(`{"model":%q,"input":["Return a short benchmark embedding.","Measure deterministic routing."]}`, model)
