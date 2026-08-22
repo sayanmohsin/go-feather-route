@@ -95,7 +95,7 @@ for production credentials. Never put real credentials in a Dockerfile,
 
 ## Configuration model
 
-Configuration precedence is CLI → environment → YAML file → safe defaults.
+Configuration precedence is supported CLI flags (`-config`, `-addr`) → environment → YAML file → safe defaults.
 Non-secret defaults belong in `config/defaults.yaml`; credentials belong in
 environment variables and can be injected by Doppler or CI. See the
 [environment guide](docs/environment.md) and [configuration guide](docs/configuration.md).

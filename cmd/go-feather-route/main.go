@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,7 +21,8 @@ func main() {
 		checkHealth()
 		return
 	}
-	cfg, err := config.LoadFromEnvironment()
+	configFile, address := commandLineOverrides()
+	cfg, err := config.LoadFromEnvironmentWith(config.Overrides{ConfigFile: configFile, Address: address})
 	if err != nil {
 		slog.Error("configuration failed", "error", err)
 		os.Exit(1)
@@ -53,6 +55,14 @@ func main() {
 		logger.Error("server shutdown failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+func commandLineOverrides() (string, string) {
+	flags := flag.NewFlagSet("go-feather-route", flag.ExitOnError)
+	configFile := flags.String("config", "", "path to the YAML configuration file")
+	address := flags.String("addr", "", "HTTP listen address")
+	_ = flags.Parse(os.Args[1:])
+	return *configFile, *address
 }
 
 func checkHealth() {

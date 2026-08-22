@@ -51,8 +51,21 @@ type ProviderConfig struct {
 	APIKey    string   `yaml:"-"`
 }
 
+// Overrides contains command-line values that take precedence over the
+// environment and YAML configuration.
+type Overrides struct {
+	ConfigFile string
+	Address    string
+}
+
 // Load reads a YAML configuration file and applies environment overrides.
 func Load(path string, env map[string]string) (Config, error) {
+	return LoadWithOverrides(path, env, Overrides{})
+}
+
+// LoadWithOverrides loads configuration using CLI overrides above environment
+// variables, YAML, and defaults.
+func LoadWithOverrides(path string, env map[string]string, overrides Overrides) (Config, error) {
 	config := defaults()
 	if path != "" {
 		data, err := os.ReadFile(path) // #nosec G304 -- the operator explicitly selects the config path.
@@ -66,6 +79,9 @@ func Load(path string, env map[string]string) (Config, error) {
 	if err := applyEnvironment(&config, env); err != nil {
 		return Config{}, err
 	}
+	if overrides.Address != "" {
+		config.Server.Address = overrides.Address
+	}
 	if err := validate(&config, env); err != nil {
 		return Config{}, err
 	}
@@ -74,6 +90,12 @@ func Load(path string, env map[string]string) (Config, error) {
 
 // LoadFromEnvironment loads configuration using the current process environment.
 func LoadFromEnvironment() (Config, error) {
+	return LoadFromEnvironmentWith(Overrides{})
+}
+
+// LoadFromEnvironmentWith loads process configuration with explicit CLI
+// overrides applied at the highest precedence.
+func LoadFromEnvironmentWith(overrides Overrides) (Config, error) {
 	env := make(map[string]string)
 	for _, item := range os.Environ() {
 		key, value, ok := strings.Cut(item, "=")
@@ -81,7 +103,10 @@ func LoadFromEnvironment() (Config, error) {
 			env[key] = value
 		}
 	}
-	path := env["GOFEATHERROUTE_CONFIG_FILE"]
+	path := overrides.ConfigFile
+	if path == "" {
+		path = env["GOFEATHERROUTE_CONFIG_FILE"]
+	}
 	if path == "" {
 		for _, candidate := range []string{"config/defaults.yaml", "/etc/go-feather-route/defaults.yaml"} {
 			if _, err := os.Stat(candidate); err == nil {
@@ -90,7 +115,7 @@ func LoadFromEnvironment() (Config, error) {
 			}
 		}
 	}
-	return Load(path, env)
+	return LoadWithOverrides(path, env, overrides)
 }
 
 func defaults() Config {

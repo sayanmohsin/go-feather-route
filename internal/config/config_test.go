@@ -23,6 +23,34 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestCLIOverridesEnvironmentAndYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  address: :4200\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadWithOverrides(path, map[string]string{"GOFEATHERROUTE_ADDR": ":4300"}, Overrides{Address: ":4400"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server.Address != ":4400" {
+		t.Fatalf("address = %q", config.Server.Address)
+	}
+}
+
+func TestCLIConfigFileOverridesEnvironmentConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cli.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  address: :4500\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadFromEnvironmentWith(Overrides{ConfigFile: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server.Address != ":4500" {
+		t.Fatalf("address = %q", config.Server.Address)
+	}
+}
+
 func TestLoadRejectsInvalidLimits(t *testing.T) {
 	_, err := Load("", map[string]string{"GOFEATHERROUTE_MAX_BODY_BYTES": "0"})
 	if err == nil {
