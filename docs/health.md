@@ -20,8 +20,9 @@ flowchart LR
 - `GET /status/models` lists configured model aliases. `GET /status/models/{model}` reports the route and whether its provider credentials are present.
 - `GET /metrics` is unauthenticated and returns a small Prometheus-compatible text response.
 
-The metrics include total requests, errors, active requests, active streams,
-completed streams, retry count, configured model count, and response bytes.
+The metrics include total requests, errors, authentication failures, active
+requests, active streams, completed and aborted streams, retry count,
+configured model count, and response bytes.
 
 Health endpoints do not make paid provider calls. Readiness confirms local
 configuration only; provider availability should be monitored with a bounded

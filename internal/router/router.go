@@ -4,6 +4,7 @@ package router
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,9 @@ type Server struct {
 	active          atomic.Int64
 	activeStreams   atomic.Int64
 	streamsTotal    atomic.Uint64
+	streamCompleted atomic.Uint64
+	streamAborted   atomic.Uint64
+	authFailures    atomic.Uint64
 	retries         atomic.Uint64
 	bytes           atomic.Uint64
 	durationMs      atomic.Uint64
@@ -123,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 		tracked.Header().Set("Server", "Go-Feather-Route")
 		tracked.Header().Set("X-Request-ID", requestID)
 		if !isPublicPath(request.URL.Path) && !s.authorized(request) {
+			s.authFailures.Add(1)
 			s.writeError(tracked, http.StatusUnauthorized, "invalid or missing bearer token")
 			return
 		}
@@ -156,17 +161,20 @@ func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(response, http.StatusOK, map[string]any{
-		"object":        "gateway_status",
-		"status":        "ok",
-		"requests":      s.requests.Load(),
-		"errors":        s.errors.Load(),
-		"models":        len(s.routes.Models()),
-		"active":        s.active.Load(),
-		"streams":       s.activeStreams.Load(),
-		"streams_total": s.streamsTotal.Load(),
-		"retries":       s.retries.Load(),
-		"bytes":         s.bytes.Load(),
-		"duration_ms":   s.durationMs.Load(),
+		"object":            "gateway_status",
+		"status":            "ok",
+		"requests":          s.requests.Load(),
+		"errors":            s.errors.Load(),
+		"models":            len(s.routes.Models()),
+		"active":            s.active.Load(),
+		"streams":           s.activeStreams.Load(),
+		"streams_total":     s.streamsTotal.Load(),
+		"streams_completed": s.streamCompleted.Load(),
+		"streams_aborted":   s.streamAborted.Load(),
+		"auth_failures":     s.authFailures.Load(),
+		"retries":           s.retries.Load(),
+		"bytes":             s.bytes.Load(),
+		"duration_ms":       s.durationMs.Load(),
 	})
 }
 
@@ -203,6 +211,9 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_requests %d\n", s.active.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_streams %d\n", s.activeStreams.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_total %d\n", s.streamsTotal.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_streams_completed_total %d\n", s.streamCompleted.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_streams_aborted_total %d\n", s.streamAborted.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_auth_failures_total %d\n", s.authFailures.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_retries_total %d\n", s.retries.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_response_bytes_total %d\n", s.bytes.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_request_duration_milliseconds_total %d\n", s.durationMs.Load())
@@ -269,7 +280,11 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if envelope.Stream {
-		s.streamResponse(response, upstream)
+		if s.streamResponse(response, upstream) {
+			s.streamCompleted.Add(1)
+		} else {
+			s.streamAborted.Add(1)
+		}
 		return
 	}
 	responseBody, ok := readBounded(upstream.Body, s.config.Server.MaxResponseBytes)
@@ -363,7 +378,7 @@ func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provid
 	_, _ = response.Write(body)
 }
 
-func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) {
+func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) bool {
 	copyHeaders(response.Header(), upstream.Header)
 	if response.Header().Get("Content-Type") == "" {
 		response.Header().Set("Content-Type", "text/event-stream")
@@ -381,14 +396,14 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 		count, err := readWithIdleTimeout(upstream.Body, buffer, s.config.Server.StreamIdleTimeout)
 		if count > 0 {
 			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
-				return
+				return false
 			}
 			if canFlush {
 				flusher.Flush()
 			}
 		}
 		if err != nil {
-			return
+			return errors.Is(err, io.EOF)
 		}
 	}
 }
@@ -487,7 +502,9 @@ func (s *Server) authorized(request *http.Request) bool {
 	if s.config.Auth.APIKey == "" {
 		return true
 	}
-	return request.Header.Get("Authorization") == "Bearer "+s.config.Auth.APIKey
+	expected := []byte("Bearer " + s.config.Auth.APIKey)
+	actual := []byte(request.Header.Get("Authorization"))
+	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
 func (s *Server) writeJSON(response http.ResponseWriter, status int, value any) {
