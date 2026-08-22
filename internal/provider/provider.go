@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +21,40 @@ type Client struct {
 	BaseURL    string
 	APIKey     string
 	HTTPClient *http.Client
+}
+
+// ClientAPI is the provider capability required by the gateway.
+type ClientAPI interface {
+	ProviderName() string
+	Chat(context.Context, []byte, bool) (Response, error)
+	Embedding(context.Context, []byte) (Response, error)
+}
+
+var _ ClientAPI = Client{}
+
+// NewHTTPClient creates the shared connection-reusing client for providers.
+func NewHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 32
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.TLSHandshakeTimeout = 5 * time.Second
+	transport.ExpectContinueTimeout = time.Second
+	return &http.Client{Transport: transport}
+}
+
+// NewClient constructs an OpenAI-compatible provider adapter.
+func NewClient(name, baseURL, apiKey string, httpClient *http.Client) Client {
+	if httpClient == nil {
+		httpClient = NewHTTPClient()
+	}
+	return Client{Name: name, BaseURL: baseURL, APIKey: apiKey, HTTPClient: httpClient}
+}
+
+// ProviderName identifies the configured provider for observability labels.
+func (c Client) ProviderName() string {
+	return c.Name
 }
 
 // Response is an upstream response whose body ownership belongs to the caller.

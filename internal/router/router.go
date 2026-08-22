@@ -11,9 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,13 +19,15 @@ import (
 	"time"
 
 	"github.com/sayanmohsin/go-feather-route/internal/config"
+	"github.com/sayanmohsin/go-feather-route/internal/gateway"
 	"github.com/sayanmohsin/go-feather-route/internal/provider"
 )
 
 // Server routes authenticated client requests to configured providers.
 type Server struct {
 	config          config.Config
-	providers       map[string]provider.Client
+	routes          gateway.Routes
+	providers       map[string]provider.ClientAPI
 	semaphore       chan struct{}
 	streamSemaphore chan struct{}
 	logger          *slog.Logger
@@ -68,25 +68,14 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 	if cfg.Server.StreamIdleTimeout <= 0 {
 		cfg.Server.StreamIdleTimeout = 30 * time.Second
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	transport.MaxIdleConns = 100
-	transport.MaxIdleConnsPerHost = 32
-	transport.IdleConnTimeout = 90 * time.Second
-	transport.TLSHandshakeTimeout = 5 * time.Second
-	transport.ExpectContinueTimeout = time.Second
-	httpClient := &http.Client{Transport: transport}
-	providers := make(map[string]provider.Client, len(cfg.Providers))
+	httpClient := provider.NewHTTPClient()
+	providers := make(map[string]provider.ClientAPI, len(cfg.Providers))
 	for name, item := range cfg.Providers {
-		providers[name] = provider.Client{
-			Name:       name,
-			BaseURL:    item.BaseURL,
-			APIKey:     item.APIKey,
-			HTTPClient: httpClient,
-		}
+		providers[name] = provider.NewClient(name, item.BaseURL, item.APIKey, httpClient)
 	}
 	return &Server{
 		config:          cfg,
+		routes:          gateway.NewRoutes(cfg.Routes),
 		providers:       providers,
 		semaphore:       make(chan struct{}, cfg.Server.MaxConcurrentRequests),
 		streamSemaphore: make(chan struct{}, cfg.Server.MaxConcurrentStreams),
@@ -150,7 +139,8 @@ func (s *Server) health(response http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
 	ready := false
-	for model, providerName := range s.config.Routes {
+	for _, model := range s.routes.Models() {
+		providerName, _ := s.routes.ProviderForModel(model)
 		if providerConfig, ok := s.config.Providers[providerName]; ok && providerConfig.APIKey != "" && model != "" {
 			ready = true
 			break
@@ -169,7 +159,7 @@ func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 		"status":        "ok",
 		"requests":      s.requests.Load(),
 		"errors":        s.errors.Load(),
-		"models":        len(s.config.Routes),
+		"models":        len(s.routes.Models()),
 		"active":        s.active.Load(),
 		"streams":       s.activeStreams.Load(),
 		"streams_total": s.streamsTotal.Load(),
@@ -180,14 +170,10 @@ func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) models(response http.ResponseWriter, _ *http.Request) {
-	modelNames := make([]string, 0, len(s.config.Routes))
-	for model := range s.config.Routes {
-		modelNames = append(modelNames, model)
-	}
-	sort.Strings(modelNames)
+	modelNames := s.routes.Models()
 	data := make([]map[string]any, 0, len(modelNames))
 	for _, model := range modelNames {
-		providerName := s.config.Routes[model]
+		providerName, _ := s.routes.ProviderForModel(model)
 		data = append(data, map[string]any{"id": model, "object": "model", "owned_by": providerName})
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{"object": "list", "data": data})
@@ -195,8 +181,8 @@ func (s *Server) models(response http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) modelStatus(response http.ResponseWriter, request *http.Request) {
 	model := request.PathValue("model")
-	providerName := s.config.Routes[model]
-	if providerName == "" {
+	providerName, ok := s.routes.ProviderForModel(model)
+	if !ok {
 		s.writeError(response, http.StatusNotFound, fmt.Sprintf("model %q is not configured", model))
 		return
 	}
@@ -273,7 +259,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
-	s.recordRouteMetric(client.Name, envelope.Model, upstream.StatusCode, upstream.Attempts)
+	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	if envelope.Stream {
 		s.activeStreams.Add(1)
 		s.streamsTotal.Add(1)
@@ -334,7 +320,7 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
-	s.recordRouteMetric(client.Name, envelope.Model, upstream.StatusCode, upstream.Attempts)
+	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	s.retries.Add(retryCount(upstream.Attempts))
 	if upstream.StatusCode >= http.StatusBadRequest {
 		s.copyUpstreamError(response, upstream)
@@ -500,16 +486,14 @@ func validateEmbeddingResponse(requestBody, responseBody []byte) error {
 	return nil
 }
 
-func (s *Server) clientFor(model string) (provider.Client, error) {
-	providerName := s.config.Routes[model]
-	if providerName == "" {
-		if name, _, ok := strings.Cut(model, "/"); ok {
-			providerName = name
-		}
+func (s *Server) clientFor(model string) (provider.ClientAPI, error) {
+	providerName, ok := s.routes.ProviderFor(model)
+	if !ok {
+		return nil, fmt.Errorf("no provider route configured for model %q", model)
 	}
 	client, ok := s.providers[providerName]
 	if !ok {
-		return provider.Client{}, fmt.Errorf("no provider route configured for model %q", model)
+		return nil, fmt.Errorf("no provider route configured for model %q", model)
 	}
 	return client, nil
 }
