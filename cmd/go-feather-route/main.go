@@ -25,8 +25,18 @@ func main() {
 		slog.Error("configuration failed", "error", err)
 		os.Exit(1)
 	}
+	if cfg.Auth.APIKey == "" {
+		slog.Error("configuration failed", "error", "GOFEATHERROUTE_API_KEY must be set")
+		os.Exit(1)
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	server := &http.Server{Addr: cfg.Server.Address, Handler: router.NewServer(cfg, logger).Handler(), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{
+		Addr:              cfg.Server.Address,
+		Handler:           router.NewServer(cfg, logger).Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    32 << 10,
+	}
 	go func() {
 		logger.Info("server starting", "address", cfg.Server.Address)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

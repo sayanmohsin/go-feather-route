@@ -35,10 +35,20 @@ gateway_id="$("${compose[@]}" ps --quiet "$service")"
 fake_id="$("${compose[@]}" ps --quiet fake-provider)"
 gateway_url="http://127.0.0.1:${BENCHMARK_HOST_PORT}"
 gateway_image="$("${compose[@]}" images -q "$service" 2>/dev/null || true)"
-gateway_architecture="$("${compose[@]}" exec -T "$service" uname -m 2>/dev/null || true)"
+gateway_architecture="$(docker image inspect --format '{{.Architecture}}' "$gateway_image" 2>/dev/null || true)"
+host_architecture="$(uname -m)"
+case "$host_architecture" in
+  x86_64) normalized_host_architecture="amd64" ;;
+  aarch64|arm64) normalized_host_architecture="arm64" ;;
+  *) normalized_host_architecture="$host_architecture" ;;
+esac
+execution_mode="native"
+if [[ -n "$gateway_architecture" && "$gateway_architecture" != "$normalized_host_architecture" ]]; then
+  execution_mode="emulated-or-translated"
+fi
 printf '{"gateway":"%s","operation":"%s","streaming":%s,"requests":%s,"concurrency":%s,"host_architecture":"%s","gateway_image_id":"%s","gateway_architecture":"%s","native_or_emulated":"%s"}\n' \
   "$target" "${BENCHMARK_OPERATION:-chat}" "${BENCHMARK_STREAMING:-false}" "${BENCHMARK_REQUESTS:-32}" "${BENCHMARK_CONCURRENCY:-1}" \
-  "$(uname -m)" "$gateway_image" "$gateway_architecture" "${BENCHMARK_EXECUTION_MODE:-unspecified}" \
+  "$normalized_host_architecture" "$gateway_image" "$gateway_architecture" "$execution_mode" \
   >"$result_dir/metadata.json"
 
 for attempt in $(seq 1 60); do

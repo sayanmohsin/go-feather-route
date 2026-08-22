@@ -166,6 +166,56 @@ func TestEmbeddingsProxiesBatchRequestAndUsage(t *testing.T) {
 	}
 }
 
+func TestEmbeddingResponseValidationRejectsInvalidVectors(t *testing.T) {
+	request := []byte(`{"model":"embedding-test","input":["first","second"]}`)
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{name: "missing vector", response: `{"data":[{"index":0,"embedding":[1,0]}]}`, want: "returned 1 embeddings"},
+		{name: "duplicate index", response: `{"data":[{"index":0,"embedding":[1,0]},{"index":0,"embedding":[0,1]}]}`, want: "duplicate"},
+		{name: "inconsistent dimensions", response: `{"data":[{"index":0,"embedding":[1,0]},{"index":1,"embedding":[0]}]}`, want: "inconsistent"},
+		{name: "non-finite value", response: `{"data":[{"index":0,"embedding":[1e999]},{"index":1,"embedding":[0,1]}]}`, want: "invalid embedding JSON"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateEmbeddingResponse(request, []byte(test.response))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestEmbeddingResponseValidationAcceptsSingleInput(t *testing.T) {
+	err := validateEmbeddingResponse(
+		[]byte(`{"model":"embedding-test","input":"hello"}`),
+		[]byte(`{"object":"list","data":[{"index":0,"embedding":[1,0]}]}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOversizedProviderResponseReturnsGatewayError(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte(`{"id":"chat","choices":[],"padding":"this response is too large"}`))
+	}))
+	defer provider.Close()
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxResponseBytes: 16, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL, APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[]}`))
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "exceeded configured limit") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestChatStreamsProviderResponse(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "text/event-stream")

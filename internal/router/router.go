@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -286,9 +288,14 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.streamResponse(response, upstream)
 		return
 	}
+	responseBody, ok := readBounded(upstream.Body, s.config.Server.MaxResponseBytes)
+	if !ok {
+		s.writeError(response, http.StatusBadGateway, "upstream response exceeded configured limit")
+		return
+	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
-	_, _ = io.Copy(response, io.LimitReader(upstream.Body, s.config.Server.MaxResponseBytes))
+	_, _ = response.Write(responseBody)
 }
 
 func (s *Server) embeddings(response http.ResponseWriter, request *http.Request) {
@@ -333,9 +340,18 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		s.copyUpstreamError(response, upstream)
 		return
 	}
+	responseBody, ok := readBounded(upstream.Body, s.config.Server.MaxResponseBytes)
+	if !ok {
+		s.writeError(response, http.StatusBadGateway, "upstream response exceeded configured limit")
+		return
+	}
+	if err := validateEmbeddingResponse(body, responseBody); err != nil {
+		s.writeError(response, http.StatusBadGateway, err.Error())
+		return
+	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
-	_, _ = io.Copy(response, io.LimitReader(upstream.Body, s.config.Server.MaxResponseBytes))
+	_, _ = response.Write(responseBody)
 }
 
 func (s *Server) recordRouteMetric(providerName, model string, status, attempts int) {
@@ -355,9 +371,14 @@ func (s *Server) recordRouteMetric(providerName, model string, status, attempts 
 }
 
 func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provider.Response) {
+	body, ok := readBounded(upstream.Body, s.config.Server.MaxResponseBytes)
+	if !ok {
+		s.writeError(response, http.StatusBadGateway, "upstream error response exceeded configured limit")
+		return
+	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
-	_, _ = io.Copy(response, io.LimitReader(upstream.Body, s.config.Server.MaxResponseBytes))
+	_, _ = response.Write(body)
 }
 
 func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) {
@@ -387,7 +408,7 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	}
 }
 
-func readWithIdleTimeout(reader io.Reader, buffer []byte, timeout time.Duration) (int, error) {
+func readWithIdleTimeout(reader io.ReadCloser, buffer []byte, timeout time.Duration) (int, error) {
 	if timeout <= 0 {
 		return reader.Read(buffer)
 	}
@@ -406,8 +427,77 @@ func readWithIdleTimeout(reader io.Reader, buffer []byte, timeout time.Duration)
 	case result := <-resultCh:
 		return result.count, result.err
 	case <-timer.C:
+		_ = reader.Close()
 		return 0, context.DeadlineExceeded
 	}
+}
+
+func readBounded(reader io.Reader, limit int64) ([]byte, bool) {
+	if limit <= 0 {
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return nil, false
+	}
+	return data, true
+}
+
+func validateEmbeddingResponse(requestBody, responseBody []byte) error {
+	var request struct {
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(requestBody, &request); err != nil {
+		return fmt.Errorf("provider returned an invalid embedding request response: %w", err)
+	}
+	if len(request.Input) == 0 {
+		return errors.New("embedding request is missing input")
+	}
+	expected := 1
+	if strings.HasPrefix(strings.TrimSpace(string(request.Input)), "[") {
+		var inputs []json.RawMessage
+		if err := json.Unmarshal(request.Input, &inputs); err != nil {
+			return fmt.Errorf("embedding input is invalid: %w", err)
+		}
+		expected = len(inputs)
+	}
+	var response struct {
+		Data []struct {
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return fmt.Errorf("provider returned invalid embedding JSON: %w", err)
+	}
+	if len(response.Data) != expected {
+		return fmt.Errorf("provider returned %d embeddings for %d inputs", len(response.Data), expected)
+	}
+	dimension := 0
+	seen := make(map[int]struct{}, len(response.Data))
+	for _, item := range response.Data {
+		if item.Index < 0 || item.Index >= expected {
+			return fmt.Errorf("provider returned invalid embedding index %d", item.Index)
+		}
+		if _, ok := seen[item.Index]; ok {
+			return fmt.Errorf("provider returned duplicate embedding index %d", item.Index)
+		}
+		seen[item.Index] = struct{}{}
+		if len(item.Embedding) == 0 {
+			return fmt.Errorf("provider returned an empty embedding at index %d", item.Index)
+		}
+		if dimension == 0 {
+			dimension = len(item.Embedding)
+		} else if len(item.Embedding) != dimension {
+			return errors.New("provider returned embeddings with inconsistent dimensions")
+		}
+		for _, value := range item.Embedding {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return fmt.Errorf("provider returned a non-finite embedding value at index %d", item.Index)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) clientFor(model string) (provider.Client, error) {

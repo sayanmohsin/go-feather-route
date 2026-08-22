@@ -33,7 +33,10 @@ make benchmark-litellm
 The harness uses the LiteLLM image digest pinned by the Cloud deployment and
 does not call a paid model. It records sanitized request results and workload
 metadata under `benchmarks/results/` and captures Docker resource samples every
-250 ms.
+250 ms. Architecture is read from Docker image metadata, so the harness does
+not depend on diagnostic binaries being present in the distroless gateway
+image. If the gateway and host architectures differ, the run is labeled
+`emulated-or-translated`.
 
 Configure the workload:
 
@@ -61,6 +64,10 @@ Each run records:
 Linux hosts may expose additional cgroup peak-memory and CPU-throttling data.
 Docker Desktop reports the VM resource envelope, so host and container values
 must be interpreted with the recorded platform and architecture.
+
+Missing host or cgroup measurements are recorded as unavailable rather than
+treated as zero. Successful throughput and error counts are reported
+separately.
 
 ## Reference measurement
 

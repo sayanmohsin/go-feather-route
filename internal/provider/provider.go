@@ -4,9 +4,12 @@ package provider
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -46,6 +49,9 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 		if err != nil {
 			lastErr = err
 			if !stream && attempt == 0 && ctx.Err() == nil {
+				if err := waitForRetry(ctx, http.Header{}, attempt); err != nil {
+					return Response{}, err
+				}
 				continue
 			}
 			return Response{}, err
@@ -57,10 +63,8 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 		if attempt == 0 && !stream {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
-			select {
-			case <-time.After(100 * time.Millisecond):
-			case <-ctx.Done():
-				return Response{}, ctx.Err()
+			if err := waitForRetry(ctx, response.Header, attempt); err != nil {
+				return Response{}, err
 			}
 			continue
 		}
@@ -82,6 +86,9 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 		if err != nil {
 			lastErr = err
 			if attempt == 0 && ctx.Err() == nil {
+				if err := waitForRetry(ctx, http.Header{}, attempt); err != nil {
+					return Response{}, err
+				}
 				continue
 			}
 			return Response{}, err
@@ -93,16 +100,45 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 		if attempt == 0 {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
-			select {
-			case <-time.After(100 * time.Millisecond):
-			case <-ctx.Done():
-				return Response{}, ctx.Err()
+			if err := waitForRetry(ctx, response.Header, attempt); err != nil {
+				return Response{}, err
 			}
 			continue
 		}
 		return response, nil
 	}
 	return Response{}, lastErr
+}
+
+func waitForRetry(ctx context.Context, headers http.Header, attempt int) error {
+	delay := 100 * time.Millisecond
+	if retryAfter := strings.TrimSpace(headers.Get("Retry-After")); retryAfter != "" {
+		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds >= 0 {
+			delay = time.Duration(seconds) * time.Second
+		} else if when, err := http.ParseTime(retryAfter); err == nil {
+			delay = time.Until(when)
+		}
+	} else if attempt > 0 {
+		delay *= time.Duration(1 << min(attempt, 4))
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	const maxRetryDelay = 500 * time.Millisecond
+	if delay > maxRetryDelay {
+		delay = maxRetryDelay
+	}
+	if jitter, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(25*time.Millisecond))); err == nil {
+		delay += time.Duration(jitter.Int64())
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c Client) doChat(ctx context.Context, endpoint string, body []byte) (Response, error) {
