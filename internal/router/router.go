@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sayanmohsin/go-feather-route/internal/config"
+	"github.com/sayanmohsin/go-feather-route/internal/contract"
 	"github.com/sayanmohsin/go-feather-route/internal/gateway"
 	"github.com/sayanmohsin/go-feather-route/internal/provider"
 )
@@ -226,12 +227,9 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusRequestEntityTooLarge, "request body is too large or unreadable")
 		return
 	}
-	var envelope struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Model == "" {
-		s.writeError(response, http.StatusBadRequest, "request must contain a valid model")
+	envelope, err := contract.DecodeChatRequest(body)
+	if err != nil {
+		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
 	client, err := s.clientFor(envelope.Model)
@@ -291,11 +289,9 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		s.writeError(response, http.StatusRequestEntityTooLarge, "request body is too large or unreadable")
 		return
 	}
-	var envelope struct {
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Model == "" {
-		s.writeError(response, http.StatusBadRequest, "request must contain a valid model")
+	envelope, err := contract.DecodeEmbeddingRequest(body)
+	if err != nil {
+		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
 	client, err := s.clientFor(envelope.Model)
@@ -430,29 +426,15 @@ func readBounded(reader io.Reader, limit int64) ([]byte, bool) {
 }
 
 func validateEmbeddingResponse(requestBody, responseBody []byte) error {
-	var request struct {
-		Input json.RawMessage `json:"input"`
+	request, err := contract.DecodeEmbeddingRequest(requestBody)
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(requestBody, &request); err != nil {
-		return fmt.Errorf("provider returned an invalid embedding request response: %w", err)
+	expected, err := request.InputCount()
+	if err != nil {
+		return err
 	}
-	if len(request.Input) == 0 {
-		return errors.New("embedding request is missing input")
-	}
-	expected := 1
-	if strings.HasPrefix(strings.TrimSpace(string(request.Input)), "[") {
-		var inputs []json.RawMessage
-		if err := json.Unmarshal(request.Input, &inputs); err != nil {
-			return fmt.Errorf("embedding input is invalid: %w", err)
-		}
-		expected = len(inputs)
-	}
-	var response struct {
-		Data []struct {
-			Index     int       `json:"index"`
-			Embedding []float64 `json:"embedding"`
-		} `json:"data"`
-	}
+	var response contract.EmbeddingResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
 		return fmt.Errorf("provider returned invalid embedding JSON: %w", err)
 	}
