@@ -82,13 +82,8 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 	for attempt := 0; attempt < 2; attempt++ {
 		response, err := c.doChat(ctx, endpoint, body)
 		if err != nil {
-			lastErr = err
-			if !stream && attempt == 0 && ctx.Err() == nil {
-				if err := waitForRetry(ctx, http.Header{}, attempt); err != nil {
-					return Response{}, err
-				}
-				continue
-			}
+			// A transport error is ambiguous: the provider may have accepted the
+			// request before the connection failed. Do not duplicate a POST.
 			return Response{}, err
 		}
 		response.Attempts = attempt + 1
@@ -119,13 +114,8 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		response, err := c.doJSON(ctx, endpoint, body, "application/json")
 		if err != nil {
-			lastErr = err
-			if attempt == 0 && ctx.Err() == nil {
-				if err := waitForRetry(ctx, http.Header{}, attempt); err != nil {
-					return Response{}, err
-				}
-				continue
-			}
+			// Embedding POSTs are also unsafe to replay after an ambiguous
+			// transport failure.
 			return Response{}, err
 		}
 		response.Attempts = attempt + 1

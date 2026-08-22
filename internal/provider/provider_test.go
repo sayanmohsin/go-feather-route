@@ -60,6 +60,26 @@ func TestClientRetriesEmbeddingResponse(t *testing.T) {
 	}
 }
 
+func TestClientDoesNotReplayAfterTransportFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		hijack, ok := response.(http.Hijacker)
+		if !ok {
+			t.Fatal("test server does not support hijacking")
+		}
+		connection, _, err := hijack.Hijack()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = connection.Close()
+	}))
+	defer server.Close()
+
+	client := Client{Name: "test", BaseURL: server.URL, APIKey: "secret", HTTPClient: server.Client()}
+	if _, err := client.Chat(context.Background(), []byte(`{"model":"test"}`), false); err == nil {
+		t.Fatal("expected transport failure")
+	}
+}
+
 func TestClientDoesNotRetryStreaming(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
