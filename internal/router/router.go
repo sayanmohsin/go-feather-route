@@ -373,6 +373,9 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	response.Header().Set("X-Accel-Buffering", "no")
 	response.WriteHeader(upstream.StatusCode)
 	flusher, canFlush := response.(http.Flusher)
+	if canFlush {
+		flusher.Flush()
+	}
 	buffer := make([]byte, 32*1024)
 	for {
 		count, err := readWithIdleTimeout(upstream.Body, buffer, s.config.Server.StreamIdleTimeout)

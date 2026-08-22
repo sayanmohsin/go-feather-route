@@ -13,6 +13,10 @@ curl --no-buffer http://127.0.0.1:4000/v1/chat/completions \
 The gateway does not retry after a stream has begun. Client cancellation is
 propagated to the provider request.
 
+Response headers are flushed before the first provider data chunk so clients
+can observe the stream boundary promptly. The gateway does not buffer the
+complete response.
+
 Streaming responses include:
 
 ```http
