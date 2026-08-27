@@ -45,6 +45,8 @@ type Server struct {
 	retries         atomic.Uint64
 	bytes           atomic.Uint64
 	durationMs      atomic.Uint64
+	upstreamMs      atomic.Uint64
+	firstByteMs     atomic.Uint64
 	routeMu         sync.Mutex
 	routeStats      map[routeKey]*routeMetric
 }
@@ -176,6 +178,8 @@ func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 		"retries":           s.retries.Load(),
 		"bytes":             s.bytes.Load(),
 		"duration_ms":       s.durationMs.Load(),
+		"upstream_ms":       s.upstreamMs.Load(),
+		"first_byte_ms":     s.firstByteMs.Load(),
 	})
 }
 
@@ -218,6 +222,8 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_retries_total %d\n", s.retries.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_response_bytes_total %d\n", s.bytes.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_request_duration_milliseconds_total %d\n", s.durationMs.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_upstream_duration_milliseconds_total %d\n", s.upstreamMs.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_first_byte_milliseconds_total %d\n", s.firstByteMs.Load())
 	s.routeMu.Lock()
 	defer s.routeMu.Unlock()
 	for key, metric := range s.routeStats {
@@ -263,7 +269,9 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	ctx, cancel := context.WithTimeout(request.Context(), s.config.Server.RequestTimeout)
 	defer cancel()
 	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
+	upstreamStarted := time.Now()
 	upstream, err := client.Chat(ctx, body, envelope.Stream)
+	s.recordDuration(&s.upstreamMs, time.Since(upstreamStarted))
 	if err != nil {
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
@@ -281,7 +289,9 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if envelope.Stream {
-		if s.streamResponse(response, upstream) {
+		completed, firstByte := s.streamResponse(response, upstream)
+		s.recordDuration(&s.firstByteMs, firstByte)
+		if completed {
 			s.streamCompleted.Add(1)
 		} else {
 			s.streamAborted.Add(1)
@@ -330,7 +340,9 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	ctx, cancel := context.WithTimeout(request.Context(), s.config.Server.RequestTimeout)
 	defer cancel()
 	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
+	upstreamStarted := time.Now()
 	upstream, err := client.Embedding(ctx, body)
+	s.recordDuration(&s.upstreamMs, time.Since(upstreamStarted))
 	if err != nil {
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
@@ -384,7 +396,7 @@ func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provid
 	_, _ = response.Write(body)
 }
 
-func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) bool {
+func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) (bool, time.Duration) {
 	copyHeaders(response.Header(), upstream.Header)
 	if response.Header().Get("Content-Type") == "" {
 		response.Header().Set("Content-Type", "text/event-stream")
@@ -398,19 +410,30 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 		flusher.Flush()
 	}
 	buffer := make([]byte, 32*1024)
+	started := time.Now()
+	var firstByte time.Duration
 	for {
 		count, err := readWithIdleTimeout(upstream.Body, buffer, s.config.Server.StreamIdleTimeout)
 		if count > 0 {
+			if firstByte == 0 {
+				firstByte = time.Since(started)
+			}
 			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
-				return false
+				return false, firstByte
 			}
 			if canFlush {
 				flusher.Flush()
 			}
 		}
 		if err != nil {
-			return errors.Is(err, io.EOF)
+			return errors.Is(err, io.EOF), firstByte
 		}
+	}
+}
+
+func (s *Server) recordDuration(target *atomic.Uint64, duration time.Duration) {
+	if milliseconds := duration.Milliseconds(); milliseconds > 0 {
+		target.Add(uint64(milliseconds)) // #nosec G115 -- duration is non-negative and bounded by process lifetime.
 	}
 }
 

@@ -363,6 +363,9 @@ func TestMetricsAccountForUnauthorizedRequests(t *testing.T) {
 	if !strings.Contains(metrics.Body.String(), "go_feather_route_auth_failures_total 1") {
 		t.Fatalf("auth metrics = %s", metrics.Body.String())
 	}
+	if !strings.Contains(metrics.Body.String(), "go_feather_route_upstream_duration_milliseconds_total") || !strings.Contains(metrics.Body.String(), "go_feather_route_first_byte_milliseconds_total") {
+		t.Fatalf("latency metrics = %s", metrics.Body.String())
+	}
 }
 
 func TestMetricsExposeProviderAndModelLabels(t *testing.T) {

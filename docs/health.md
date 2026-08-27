@@ -21,8 +21,9 @@ flowchart LR
 - `GET /metrics` is unauthenticated and returns a small Prometheus-compatible text response.
 
 The metrics include total requests, errors, authentication failures, active
-requests, active streams, completed and aborted streams, retry count,
-configured model count, and response bytes.
+requests, active streams, completed and aborted streams, retry count, request
+duration, upstream duration, first-byte latency, configured model count, and
+response bytes.
 
 Health endpoints do not make paid provider calls. Readiness confirms local
 configuration only; provider availability should be monitored with a bounded
