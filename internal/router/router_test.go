@@ -176,7 +176,7 @@ func TestEmbeddingResponseValidationRejectsInvalidVectors(t *testing.T) {
 		{name: "missing vector", response: `{"data":[{"index":0,"embedding":[1,0]}]}`, want: "returned 1 embeddings"},
 		{name: "duplicate index", response: `{"data":[{"index":0,"embedding":[1,0]},{"index":0,"embedding":[0,1]}]}`, want: "duplicate"},
 		{name: "inconsistent dimensions", response: `{"data":[{"index":0,"embedding":[1,0]},{"index":1,"embedding":[0]}]}`, want: "inconsistent"},
-		{name: "non-finite value", response: `{"data":[{"index":0,"embedding":[1e999]},{"index":1,"embedding":[0,1]}]}`, want: "invalid embedding JSON"},
+		{name: "non-finite value", response: `{"data":[{"index":0,"embedding":[1e999]},{"index":1,"embedding":[0,1]}]}`, want: "invalid embedding data"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -282,7 +282,7 @@ func TestEmbeddingsPreserveBatchOrdering(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if strings.Index(body, `"index":1`) < strings.Index(body, `"index":0`) {
+	if strings.Index(body, `"index":0`) < strings.Index(body, `"index":1`) {
 		return
 	}
 	t.Fatalf("provider response was not passed through with its indexes: %s", body)

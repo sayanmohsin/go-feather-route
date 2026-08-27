@@ -80,3 +80,16 @@ func (request EmbeddingRequest) InputCount() (int, error) {
 	}
 	return 1, nil
 }
+
+// ValidateChatResponse checks that a successful non-streaming response is a
+// JSON object. Provider-specific fields remain untouched by the gateway.
+func ValidateChatResponse(data []byte) error {
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(data, &response); err != nil {
+		return fmt.Errorf("provider returned invalid chat JSON: %w", err)
+	}
+	if response == nil {
+		return errors.New("provider returned an empty chat response")
+	}
+	return nil
+}

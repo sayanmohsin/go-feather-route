@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -292,6 +293,10 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusBadGateway, "upstream response exceeded configured limit")
 		return
 	}
+	if err := contract.ValidateChatResponse(responseBody); err != nil {
+		s.writeError(response, http.StatusBadGateway, err.Error())
+		return
+	}
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = response.Write(responseBody)
@@ -342,7 +347,8 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		s.writeError(response, http.StatusBadGateway, "upstream response exceeded configured limit")
 		return
 	}
-	if err := validateEmbeddingResponse(body, responseBody); err != nil {
+	responseBody, err = normalizeEmbeddingResponse(body, responseBody)
+	if err != nil {
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -444,46 +450,69 @@ func readBounded(reader io.Reader, limit int64) ([]byte, bool) {
 }
 
 func validateEmbeddingResponse(requestBody, responseBody []byte) error {
+	_, err := normalizeEmbeddingResponse(requestBody, responseBody)
+	return err
+}
+
+func normalizeEmbeddingResponse(requestBody, responseBody []byte) ([]byte, error) {
 	request, err := contract.DecodeEmbeddingRequest(requestBody)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	expected, err := request.InputCount()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var response contract.EmbeddingResponse
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return fmt.Errorf("provider returned invalid embedding JSON: %w", err)
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(responseBody, &envelope); err != nil {
+		return nil, fmt.Errorf("provider returned invalid embedding JSON: %w", err)
 	}
-	if len(response.Data) != expected {
-		return fmt.Errorf("provider returned %d embeddings for %d inputs", len(response.Data), expected)
+	data, ok := envelope["data"]
+	if !ok {
+		return nil, errors.New("provider embedding response is missing data")
+	}
+	var response []contract.EmbeddingData
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("provider returned invalid embedding data: %w", err)
+	}
+	if len(response) != expected {
+		return nil, fmt.Errorf("provider returned %d embeddings for %d inputs", len(response), expected)
 	}
 	dimension := 0
-	seen := make(map[int]struct{}, len(response.Data))
-	for _, item := range response.Data {
+	seen := make(map[int]struct{}, len(response))
+	for _, item := range response {
 		if item.Index < 0 || item.Index >= expected {
-			return fmt.Errorf("provider returned invalid embedding index %d", item.Index)
+			return nil, fmt.Errorf("provider returned invalid embedding index %d", item.Index)
 		}
 		if _, ok := seen[item.Index]; ok {
-			return fmt.Errorf("provider returned duplicate embedding index %d", item.Index)
+			return nil, fmt.Errorf("provider returned duplicate embedding index %d", item.Index)
 		}
 		seen[item.Index] = struct{}{}
 		if len(item.Embedding) == 0 {
-			return fmt.Errorf("provider returned an empty embedding at index %d", item.Index)
+			return nil, fmt.Errorf("provider returned an empty embedding at index %d", item.Index)
 		}
 		if dimension == 0 {
 			dimension = len(item.Embedding)
 		} else if len(item.Embedding) != dimension {
-			return errors.New("provider returned embeddings with inconsistent dimensions")
+			return nil, errors.New("provider returned embeddings with inconsistent dimensions")
 		}
 		for _, value := range item.Embedding {
 			if math.IsNaN(value) || math.IsInf(value, 0) {
-				return fmt.Errorf("provider returned a non-finite embedding value at index %d", item.Index)
+				return nil, fmt.Errorf("provider returned a non-finite embedding value at index %d", item.Index)
 			}
 		}
 	}
-	return nil
+	sort.Slice(response, func(left, right int) bool { return response[left].Index < response[right].Index })
+	ordered, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("marshal normalized embeddings: %w", err)
+	}
+	envelope["data"] = ordered
+	normalized, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("marshal normalized embedding response: %w", err)
+	}
+	return normalized, nil
 }
 
 func (s *Server) clientFor(model string) (provider.ClientAPI, error) {

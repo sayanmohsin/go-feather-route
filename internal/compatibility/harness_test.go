@@ -66,7 +66,7 @@ func TestFixturesReplayChatAndEmbeddings(t *testing.T) {
 		}
 		if request.URL.Path == "/v1/chat/completions" {
 			response.Header().Set("Content-Type", "application/json")
-			_, _ = response.Write([]byte(`{"id":"chat_fixture","choices":[{"index":0,"message":{"role":"assistant","content":"{\\"answer\\":\\"ok\\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}`))
+			_, _ = response.Write([]byte(`{"id":"chat_fixture","choices":[{"index":0,"message":{"role":"assistant","content":"{\"answer\":\"ok\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}`))
 			return
 		}
 		response.Header().Set("Content-Type", "application/json")

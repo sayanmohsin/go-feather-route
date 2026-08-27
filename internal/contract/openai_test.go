@@ -32,3 +32,9 @@ func TestEmbeddingRequestRejectsEmptyBatch(t *testing.T) {
 		t.Fatal("expected empty batch error")
 	}
 }
+
+func TestValidateChatResponseRejectsMalformedJSON(t *testing.T) {
+	if err := ValidateChatResponse([]byte(`not-json`)); err == nil {
+		t.Fatal("expected malformed response error")
+	}
+}
