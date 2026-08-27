@@ -1,0 +1,9 @@
+{
+  "name": "project-memory-batch",
+  "operation": "embeddings",
+  "model": "embedding-model",
+  "body": {
+    "model": "embedding-model",
+    "input": ["first memory", "second memory"]
+  }
+}

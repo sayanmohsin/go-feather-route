@@ -1,0 +1,11 @@
+{
+  "name": "structured-chat",
+  "operation": "chat",
+  "model": "benchmark-model",
+  "body": {
+    "model": "benchmark-model",
+    "messages": [{"role": "user", "content": "Return a short JSON answer."}],
+    "max_tokens": 64,
+    "response_format": {"type": "json_object"}
+  }
+}
