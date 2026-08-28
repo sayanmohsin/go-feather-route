@@ -9,11 +9,8 @@ services:
 
   go-feather-route:
     profiles: ["go"]
-    build:
-      context: ..
-      args:
-        VERSION: benchmark
-    image: go-feather-route:benchmark
+    image: ${GOFEATHERROUTE_IMAGE:-docker.io/sayanmohsin/go-feather-route@sha256:b7f03f77be4f1910cae341c4bc2395f421134b7f875c3a8208334afda6118476}
+    pull_policy: always
     ports:
       - "${BENCHMARK_HOST_PORT:-4400}:4000"
     environment:

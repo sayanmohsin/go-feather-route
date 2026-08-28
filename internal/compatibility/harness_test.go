@@ -59,7 +59,11 @@ func newGateway(t *testing.T, providerHandler http.Handler) *httptest.Server {
 
 func TestFixturesReplayChatAndEmbeddings(t *testing.T) {
 	chat := loadFixture(t, "chat.json")
+	agent := loadFixture(t, "agent.json")
+	nlq := loadFixture(t, "nlq.json")
+	classification := loadFixture(t, "classification.json")
 	embeddings := loadFixture(t, "embeddings.json")
+	projectMemory := loadFixture(t, "project-memory.json")
 	provider := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") != "Bearer provider-key" {
 			t.Fatalf("provider authorization = %q", request.Header.Get("Authorization"))
@@ -75,7 +79,7 @@ func TestFixturesReplayChatAndEmbeddings(t *testing.T) {
 	gateway := newGateway(t, provider)
 	defer gateway.Close()
 
-	for _, value := range []fixture{chat, embeddings} {
+	for _, value := range []fixture{chat, agent, nlq, classification, embeddings, projectMemory} {
 		t.Run(value.Name, func(t *testing.T) {
 			endpoint := "/v1/" + value.Operation
 			if value.Operation == "chat" {

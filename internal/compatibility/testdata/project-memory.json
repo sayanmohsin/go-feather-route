@@ -1,0 +1,12 @@
+{
+  "name": "project-memory-batch",
+  "operation": "embeddings",
+  "model": "embedding-model",
+  "body": {
+    "model": "embedding-model",
+    "input": [
+      "Project context for the workspace.",
+      "A durable memory item used for retrieval."
+    ]
+  }
+}
