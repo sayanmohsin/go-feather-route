@@ -3,7 +3,7 @@
 This harness compares Go Feather Route with the pinned LiteLLM image against a
 deterministic fake OpenAI-compatible provider. It does not call a paid model.
 
-Requirements: Docker, Docker Compose, Go 1.26, `curl`, and Bash.
+Requirements: Docker, Docker Compose, Go 1.27, `curl`, and Bash.
 
 Run one gateway:
 

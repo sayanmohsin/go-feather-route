@@ -1,6 +1,6 @@
 # Getting started
 
-Install Go 1.26, clone the repository, and configure at least one provider.
+Install Go 1.27, clone the repository, and configure at least one provider.
 
 ```bash
 git clone https://github.com/sayanmohsin/go-feather-route.git
