@@ -2,6 +2,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -128,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 		requestID := requestID(request.Header.Get("X-Request-ID"))
 		request.Header.Set("X-Request-ID", requestID)
 		tracked.Header().Set("Server", "Go-Feather-Route")
+		tracked.Header().Set("X-Go-Feather-Route", "go-feather-route")
 		tracked.Header().Set("X-Request-ID", requestID)
 		if !isPublicPath(request.URL.Path) && !s.authorized(request) {
 			s.authFailures.Add(1)
@@ -412,6 +414,8 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	buffer := make([]byte, 32*1024)
 	started := time.Now()
 	var firstByte time.Duration
+	streamTail := make([]byte, 0, len("data: [DONE]")+2)
+	done := false
 	for {
 		count, err := readWithIdleTimeout(upstream.Body, buffer, s.config.Server.StreamIdleTimeout)
 		if count > 0 {
@@ -421,12 +425,19 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
 				return false, firstByte
 			}
+			streamTail = append(streamTail, buffer[:count]...)
+			if bytes.Contains(streamTail, []byte("data: [DONE]")) {
+				done = true
+			}
+			if len(streamTail) > len("data: [DONE]")+2 {
+				streamTail = streamTail[len(streamTail)-(len("data: [DONE]")+2):]
+			}
 			if canFlush {
 				flusher.Flush()
 			}
 		}
 		if err != nil {
-			return errors.Is(err, io.EOF), firstByte
+			return done && errors.Is(err, io.EOF), firstByte
 		}
 	}
 }

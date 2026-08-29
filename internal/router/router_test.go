@@ -60,8 +60,8 @@ func TestChatProxiesNonStreamingRequest(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "chatcmpl_test") {
 		t.Fatalf("body = %s", response.Body.String())
 	}
-	if response.Header().Get("Server") != "Go-Feather-Route" || response.Header().Get("X-Request-ID") != "request-123" {
-		t.Fatalf("gateway headers = server=%q request-id=%q", response.Header().Get("Server"), response.Header().Get("X-Request-ID"))
+	if response.Header().Get("Server") != "Go-Feather-Route" || response.Header().Get("X-Go-Feather-Route") != "go-feather-route" || response.Header().Get("X-Request-ID") != "request-123" {
+		t.Fatalf("gateway headers = server=%q marker=%q request-id=%q", response.Header().Get("Server"), response.Header().Get("X-Go-Feather-Route"), response.Header().Get("X-Request-ID"))
 	}
 	if response.Header().Get("X-RateLimit-Limit") != "10" {
 		t.Fatalf("rate limit header = %q", response.Header().Get("X-RateLimit-Limit"))
@@ -252,6 +252,34 @@ func TestChatStreamsProviderResponse(t *testing.T) {
 	}
 }
 
+func TestChatMarksStreamWithoutDoneAsAborted(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.WriteHeader(http.StatusOK)
+		_, _ = response.Write([]byte("data: {\"choices\":[]}" + "\n\n"))
+	}))
+	defer provider.Close()
+
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, StreamIdleTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"test-model": "openai"},
+	}
+	server := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"messages":[]}`))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "choices") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	metrics := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/status", nil))
+	if !strings.Contains(metrics.Body.String(), `"streams_completed":0`) || !strings.Contains(metrics.Body.String(), `"streams_aborted":1`) {
+		t.Fatalf("status metrics = %s", metrics.Body.String())
+	}
+}
+
 func TestRequestBodyLimitReturnsOpenAIError(t *testing.T) {
 	cfg := config.Config{
 		Server: config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 8, MaxConcurrentRequests: 1},
@@ -341,6 +369,9 @@ func TestGatewayGeneratesRequestID(t *testing.T) {
 	}
 	if response.Header().Get("Server") != "Go-Feather-Route" {
 		t.Fatalf("server header = %q", response.Header().Get("Server"))
+	}
+	if response.Header().Get("X-Go-Feather-Route") != "go-feather-route" {
+		t.Fatalf("gateway marker = %q", response.Header().Get("X-Go-Feather-Route"))
 	}
 }
 
