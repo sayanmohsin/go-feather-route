@@ -7,8 +7,8 @@ TOOLS_BIN := $(CURDIR)/bin
 # Go 1.27-compatible upstream revision until the next stable release.
 STATICCHECK_VERSION := v0.7.0-0.dev.0.20260824195211-6cb65e58a558
 GOIMPORTS_VERSION := v0.36.0
-GOSEC_VERSION := v2.22.8
-GOVULNCHECK_VERSION := v1.1.4
+GOSEC_VERSION := v2.29.0
+GOVULNCHECK_VERSION := v1.7.0
 GOLANGCILINT_VERSION := v2.13.2
 
 .PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench benchmark-go benchmark-litellm benchmark-deepseek build docker check
