@@ -132,8 +132,9 @@ func defaults() Config {
 		},
 		Auth: AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
 		Providers: map[string]ProviderConfig{
-			"openai":   {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Models: []string{"gpt-4o-mini"}},
-			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Models: []string{"deepseek-chat"}},
+			// These are provider URLs and environment variable names, not credentials.
+			"openai":   {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Models: []string{"gpt-4o-mini"}},       //nolint:gosec // G101: no secret value is embedded.
+			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Models: []string{"deepseek-chat"}}, //nolint:gosec // G101: no secret value is embedded.
 		},
 		Routes: map[string]string{"gpt-4o-mini": "openai", "deepseek-chat": "deepseek"},
 	}

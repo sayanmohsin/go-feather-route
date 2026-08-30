@@ -3,11 +3,13 @@ SHELL := /bin/sh
 BIN := go-feather-route
 TOOLS_BIN := $(CURDIR)/bin
 
-STATICCHECK_VERSION := 2025.1.1
+# Staticcheck 2025.1.1 cannot read Go 1.27 export data. Pin the first
+# Go 1.27-compatible upstream revision until the next stable release.
+STATICCHECK_VERSION := v0.7.0-0.dev.0.20260824195211-6cb65e58a558
 GOIMPORTS_VERSION := v0.36.0
 GOSEC_VERSION := v2.22.8
 GOVULNCHECK_VERSION := v1.1.4
-GOLANGCILINT_VERSION := v2.1.6
+GOLANGCILINT_VERSION := v2.13.2
 
 .PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench benchmark-go benchmark-litellm benchmark-deepseek build docker check
 
