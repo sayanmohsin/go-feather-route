@@ -109,6 +109,12 @@ exposes those measurements. The homepage shows a concise summary; the full
 [benchmark methodology and results](docs/benchmarks.md) explain platform and
 architecture context before the numbers are interpreted.
 
+A preliminary Thingd Cloud canary also returned 10/10 successful chat requests
+through both gateways and showed lower Go Feather Route p95 latency and
+streaming time-to-first-byte in that sample. Embeddings and comparable resource
+usage were not yet qualified, so this result does not by itself justify
+replacing LiteLLM. See the [Cloud canary results](docs/benchmarks.md#thingd-cloud-canary).
+
 ## Long-term direction
 
 Go Feather Route is intended to grow into a small operational boundary for

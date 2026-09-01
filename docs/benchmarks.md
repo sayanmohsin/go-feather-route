@@ -89,6 +89,32 @@ LiteLLM’s emulated architecture and startup behavior materially affect this
 reference result. Run the harness on the target deployment architecture before
 making capacity decisions.
 
+## Thingd Cloud canary
+
+On 2026-09-01, Thingd Cloud ran a local canary against the same running
+DeepSeek-backed workload through Go Feather Route and LiteLLM. Each gateway
+received ten sequential non-streaming chat requests using the
+`deepseek-v4-flash` model, followed by one streaming request. Both gateways
+returned 10/10 successful chat responses and remained healthy with zero
+restarts and no OOM state.
+
+| Measurement | Go Feather Route | LiteLLM |
+| --- | ---: | ---: |
+| Chat mean latency | 3.058 s | 3.155 s |
+| Chat median latency | 2.800 s | 2.291 s |
+| Chat p95 latency | 4.865 s | 7.973 s |
+| Streaming time to first byte | 0.353 s | 0.410 s |
+| Streaming total time | 1.219 s | 3.803 s |
+| Chat success rate | 10/10 | 10/10 |
+
+This is an integration canary, not a replacement qualification. The sample did
+not capture comparable container CPU or memory measurements. Embeddings were
+not a pass: LiteLLM rejected the configured model group with HTTP 404, while Go
+Feather Route reached the provider and received HTTP 429 for insufficient
+provider quota. Validate embeddings, project-memory retrieval, usage
+accounting, retries, cancellation, and resource usage on the target deployment
+before replacing LiteLLM.
+
 ## Optional DeepSeek smoke test
 
 The real-provider test is manual only and requires Doppler or another secret

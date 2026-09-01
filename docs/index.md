@@ -49,6 +49,12 @@ features:
   measurement environment and interpretation rules.
 </div>
 
+The first Thingd Cloud integration canary returned 10/10 successful chat
+requests through both Go Feather Route and LiteLLM, with lower Go Feather Route
+p95 latency and streaming time-to-first-byte in that sample. Embeddings and
+comparable resource usage remain qualification work; see the [full canary
+results](benchmarks.md#thingd-cloud-canary).
+
 <div class="metric-grid">
   <div class="metric-card"><div class="label">Gateway idle RSS</div><div class="value">~4.5 MiB</div><div class="note">Reference container measurement</div></div>
   <div class="metric-card"><div class="label">Proxy p50</div><div class="value">0.64 ms</div><div class="note">16 requests / concurrency 4</div></div>
