@@ -316,6 +316,67 @@ func TestEmbeddingsPreserveBatchOrdering(t *testing.T) {
 	t.Fatalf("provider response was not passed through with its indexes: %s", body)
 }
 
+func TestOrderedEmbeddingResponseIsForwardedWithoutReencoding(t *testing.T) {
+	responseBody := `{"object":"list","data":[{"index":0,"embedding":[1,0]},{"index":1,"embedding":[0,1]}],"model":"embedding-test","usage":{"prompt_tokens":2,"total_tokens":2}}`
+	if normalized, err := normalizeEmbeddingResponse([]byte(`{"model":"embedding-test","input":["first","second"]}`), []byte(responseBody)); err != nil {
+		t.Fatal(err)
+	} else if string(normalized) != responseBody {
+		t.Fatalf("ordered response was re-encoded: %s", normalized)
+	}
+}
+
+func TestEmbeddingLimitDoesNotBlockChat(t *testing.T) {
+	chatStarted := make(chan struct{})
+	embeddingStarted := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/v1/embeddings" {
+			close(embeddingStarted)
+			<-chatStarted
+			_, _ = response.Write([]byte(`{"object":"list","data":[{"index":0,"embedding":[1]}]}`))
+			return
+		}
+		close(chatStarted)
+		_, _ = response.Write([]byte(`{"id":"chat","choices":[]}`))
+	}))
+	defer provider.Close()
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxResponseBytes: 1024, MaxConcurrentRequests: 1, MaxConcurrentEmbeddings: 1},
+		Providers: map[string]config.ProviderConfig{"openai": {BaseURL: provider.URL + "/v1", APIKey: "provider-secret"}},
+		Routes:    map[string]string{"chat-model": "openai", "embedding-model": "openai"},
+	}
+	server := httptest.NewServer(NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+	client := server.Client()
+	embeddingDone := make(chan error, 1)
+	go func() {
+		request, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/embeddings", strings.NewReader(`{"model":"embedding-model","input":"hello"}`))
+		request.Header.Set("Authorization", "Bearer provider-secret")
+		response, err := client.Do(request)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		embeddingDone <- err
+	}()
+	select {
+	case <-embeddingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("embedding request did not reach provider")
+	}
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"chat-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer provider-secret")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("chat status = %d", response.StatusCode)
+	}
+	if err := <-embeddingDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOperationalEndpoints(t *testing.T) {
 	cfg := config.Config{
 		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},

@@ -56,6 +56,7 @@ func main() {
 	concurrency := flag.Int("concurrency", 1, "maximum concurrent requests")
 	streaming := flag.Bool("stream", false, "use SSE streaming")
 	operation := flag.String("operation", "chat", "operation: chat or embeddings")
+	warmup := flag.Int("warmup", 0, "number of unmeasured warm-up requests")
 	output := flag.String("output", "benchmark.json", "output JSON path")
 	flag.Parse()
 	if *requests < 1 || *concurrency < 1 || (*operation != "chat" && *operation != "embeddings") || (*operation == "embeddings" && *streaming) {
@@ -63,6 +64,12 @@ func main() {
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
+	for index := 0; index < *warmup; index++ {
+		warmupResult := request(context.Background(), client, *url, *key, *model, *operation, *streaming)
+		if warmupResult.Error != "" || warmupResult.Status >= http.StatusBadRequest {
+			fatal("warm-up request failed")
+		}
+	}
 	started := time.Now()
 	results := make([]result, *requests)
 	jobs := make(chan int)

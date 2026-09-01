@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"time"
@@ -59,10 +60,12 @@ func (c Client) ProviderName() string {
 
 // Response is an upstream response whose body ownership belongs to the caller.
 type Response struct {
-	StatusCode int
-	Header     http.Header
-	Body       io.ReadCloser
-	Attempts   int
+	StatusCode            int
+	Header                http.Header
+	Body                  io.ReadCloser
+	Attempts              int
+	ConnectionDuration    time.Duration
+	FirstResponseDuration time.Duration
 }
 
 type requestIDContextKey struct{}
@@ -171,6 +174,20 @@ func (c Client) doChat(ctx context.Context, endpoint string, body []byte) (Respo
 }
 
 func (c Client) doJSON(ctx context.Context, endpoint string, body []byte, accept string) (Response, error) {
+	started := time.Now()
+	var connectStarted time.Time
+	var connectionDuration time.Duration
+	var firstResponseDuration time.Duration
+	trace := &httptrace.ClientTrace{
+		ConnectStart: func(_, _ string) { connectStarted = time.Now() },
+		ConnectDone: func(_, _ string, _ error) {
+			if !connectStarted.IsZero() {
+				connectionDuration = time.Since(connectStarted)
+			}
+		},
+		GotFirstResponseByte: func() { firstResponseDuration = time.Since(started) },
+	}
+	ctx = httptrace.WithClientTrace(ctx, trace)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Response{}, fmt.Errorf("create provider request: %w", err)
@@ -185,5 +202,5 @@ func (c Client) doJSON(ctx context.Context, endpoint string, body []byte, accept
 	if err != nil {
 		return Response{}, fmt.Errorf("call provider %s: %w", c.Name, err)
 	}
-	return Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil //nolint:bodyclose // ownership transfers to the caller.
+	return Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body, ConnectionDuration: connectionDuration, FirstResponseDuration: firstResponseDuration}, nil //nolint:bodyclose // ownership transfers to the caller.
 }

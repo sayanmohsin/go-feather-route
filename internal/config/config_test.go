@@ -65,6 +65,16 @@ func TestLoadRejectsMalformedNumericEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadEmbeddingConcurrencyOverride(t *testing.T) {
+	config, err := Load("", map[string]string{"GOFEATHERROUTE_MAX_CONCURRENT_EMBEDDINGS": "3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server.MaxConcurrentEmbeddings != 3 {
+		t.Fatalf("embedding concurrency = %d", config.Server.MaxConcurrentEmbeddings)
+	}
+}
+
 func TestEnvironmentExample(t *testing.T) {
 	data, err := os.ReadFile("../../.env.example")
 	if err != nil {
@@ -80,6 +90,7 @@ func TestEnvironmentExample(t *testing.T) {
 		"GOFEATHERROUTE_MAX_BODY_BYTES",
 		"GOFEATHERROUTE_MAX_RESPONSE_BYTES",
 		"GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS",
+		"GOFEATHERROUTE_MAX_CONCURRENT_EMBEDDINGS",
 		"GOFEATHERROUTE_MAX_CONCURRENT_STREAMS",
 		"GOFEATHERROUTE_API_KEY",
 		"OPENAI_API_KEY",

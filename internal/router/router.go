@@ -29,27 +29,32 @@ import (
 
 // Server routes authenticated client requests to configured providers.
 type Server struct {
-	config          config.Config
-	routes          gateway.Routes
-	providers       map[string]provider.ClientAPI
-	semaphore       chan struct{}
-	streamSemaphore chan struct{}
-	logger          *slog.Logger
-	requests        atomic.Uint64
-	errors          atomic.Uint64
-	active          atomic.Int64
-	activeStreams   atomic.Int64
-	streamsTotal    atomic.Uint64
-	streamCompleted atomic.Uint64
-	streamAborted   atomic.Uint64
-	authFailures    atomic.Uint64
-	retries         atomic.Uint64
-	bytes           atomic.Uint64
-	durationMs      atomic.Uint64
-	upstreamMs      atomic.Uint64
-	firstByteMs     atomic.Uint64
-	routeMu         sync.Mutex
-	routeStats      map[routeKey]*routeMetric
+	config             config.Config
+	routes             gateway.Routes
+	providers          map[string]provider.ClientAPI
+	semaphore          chan struct{}
+	embeddingSemaphore chan struct{}
+	streamSemaphore    chan struct{}
+	logger             *slog.Logger
+	requests           atomic.Uint64
+	errors             atomic.Uint64
+	active             atomic.Int64
+	activeEmbeddings   atomic.Int64
+	activeStreams      atomic.Int64
+	streamsTotal       atomic.Uint64
+	streamCompleted    atomic.Uint64
+	streamAborted      atomic.Uint64
+	authFailures       atomic.Uint64
+	retries            atomic.Uint64
+	bytes              atomic.Uint64
+	durationMs         atomic.Uint64
+	upstreamMs         atomic.Uint64
+	firstByteMs        atomic.Uint64
+	firstResponseMs    atomic.Uint64
+	selectionMs        atomic.Uint64
+	connectionMs       atomic.Uint64
+	routeMu            sync.Mutex
+	routeStats         map[routeKey]*routeMetric
 }
 
 type routeKey struct {
@@ -71,6 +76,9 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 	if cfg.Server.MaxConcurrentStreams <= 0 {
 		cfg.Server.MaxConcurrentStreams = 4
 	}
+	if cfg.Server.MaxConcurrentEmbeddings <= 0 {
+		cfg.Server.MaxConcurrentEmbeddings = 2
+	}
 	if cfg.Server.MaxResponseBytes <= 0 {
 		cfg.Server.MaxResponseBytes = 8 << 20
 	}
@@ -83,13 +91,14 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 		providers[name] = provider.NewClient(name, item.BaseURL, item.APIKey, httpClient)
 	}
 	return &Server{
-		config:          cfg,
-		routes:          gateway.NewRoutes(cfg.Routes),
-		providers:       providers,
-		semaphore:       make(chan struct{}, cfg.Server.MaxConcurrentRequests),
-		streamSemaphore: make(chan struct{}, cfg.Server.MaxConcurrentStreams),
-		logger:          logger,
-		routeStats:      make(map[routeKey]*routeMetric),
+		config:             cfg,
+		routes:             gateway.NewRoutes(cfg.Routes),
+		providers:          providers,
+		semaphore:          make(chan struct{}, cfg.Server.MaxConcurrentRequests),
+		embeddingSemaphore: make(chan struct{}, cfg.Server.MaxConcurrentEmbeddings),
+		streamSemaphore:    make(chan struct{}, cfg.Server.MaxConcurrentStreams),
+		logger:             logger,
+		routeStats:         make(map[routeKey]*routeMetric),
 	}
 }
 
@@ -166,22 +175,26 @@ func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(response, http.StatusOK, map[string]any{
-		"object":            "gateway_status",
-		"status":            "ok",
-		"requests":          s.requests.Load(),
-		"errors":            s.errors.Load(),
-		"models":            len(s.routes.Models()),
-		"active":            s.active.Load(),
-		"streams":           s.activeStreams.Load(),
-		"streams_total":     s.streamsTotal.Load(),
-		"streams_completed": s.streamCompleted.Load(),
-		"streams_aborted":   s.streamAborted.Load(),
-		"auth_failures":     s.authFailures.Load(),
-		"retries":           s.retries.Load(),
-		"bytes":             s.bytes.Load(),
-		"duration_ms":       s.durationMs.Load(),
-		"upstream_ms":       s.upstreamMs.Load(),
-		"first_byte_ms":     s.firstByteMs.Load(),
+		"object":                      "gateway_status",
+		"status":                      "ok",
+		"requests":                    s.requests.Load(),
+		"errors":                      s.errors.Load(),
+		"models":                      len(s.routes.Models()),
+		"active":                      s.active.Load(),
+		"active_embeddings":           s.activeEmbeddings.Load(),
+		"streams":                     s.activeStreams.Load(),
+		"streams_total":               s.streamsTotal.Load(),
+		"streams_completed":           s.streamCompleted.Load(),
+		"streams_aborted":             s.streamAborted.Load(),
+		"auth_failures":               s.authFailures.Load(),
+		"retries":                     s.retries.Load(),
+		"bytes":                       s.bytes.Load(),
+		"duration_ms":                 s.durationMs.Load(),
+		"upstream_ms":                 s.upstreamMs.Load(),
+		"first_byte_ms":               s.firstByteMs.Load(),
+		"provider_selection_ms":       s.selectionMs.Load(),
+		"connection_establishment_ms": s.connectionMs.Load(),
+		"first_response_ms":           s.firstResponseMs.Load(),
 	})
 }
 
@@ -216,6 +229,7 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_errors_total %d\n", s.errors.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_models_total %d\n", len(s.config.Routes))
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_requests %d\n", s.active.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_active_embeddings %d\n", s.activeEmbeddings.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_streams %d\n", s.activeStreams.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_total %d\n", s.streamsTotal.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_completed_total %d\n", s.streamCompleted.Load())
@@ -226,6 +240,9 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_request_duration_milliseconds_total %d\n", s.durationMs.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_upstream_duration_milliseconds_total %d\n", s.upstreamMs.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_first_byte_milliseconds_total %d\n", s.firstByteMs.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_provider_selection_milliseconds_total %d\n", s.selectionMs.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_connection_establishment_milliseconds_total %d\n", s.connectionMs.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_first_response_milliseconds_total %d\n", s.firstResponseMs.Load())
 	s.routeMu.Lock()
 	defer s.routeMu.Unlock()
 	for key, metric := range s.routeStats {
@@ -252,7 +269,9 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
+	selectionStarted := time.Now()
 	client, err := s.clientFor(envelope.Model)
+	s.recordDuration(&s.selectionMs, time.Since(selectionStarted))
 	if err != nil {
 		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
@@ -279,6 +298,8 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
+	s.recordDuration(&s.connectionMs, upstream.ConnectionDuration)
+	s.recordDuration(&s.firstResponseMs, upstream.FirstResponseDuration)
 	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	if envelope.Stream {
 		s.activeStreams.Add(1)
@@ -326,12 +347,16 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
+	selectionStarted := time.Now()
 	client, err := s.clientFor(envelope.Model)
+	s.recordDuration(&s.selectionMs, time.Since(selectionStarted))
 	if err != nil {
 		s.writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
-	concurrency := s.semaphore
+	concurrency := s.embeddingSemaphore
+	s.activeEmbeddings.Add(1)
+	defer s.activeEmbeddings.Add(-1)
 	select {
 	case concurrency <- struct{}{}:
 		defer func() { <-concurrency }()
@@ -350,6 +375,8 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	defer func() { _ = upstream.Body.Close() }()
+	s.recordDuration(&s.connectionMs, upstream.ConnectionDuration)
+	s.recordDuration(&s.firstResponseMs, upstream.FirstResponseDuration)
 	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	s.retries.Add(retryCount(upstream.Attempts))
 	if upstream.StatusCode >= http.StatusBadRequest {
@@ -414,10 +441,16 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	buffer := make([]byte, 32*1024)
 	started := time.Now()
 	var firstByte time.Duration
-	streamTail := make([]byte, 0, len("data: [DONE]")+2)
+	var streamTail [len(doneMarker) - 1]byte
+	tailLength := 0
 	done := false
+	watchdog := newStreamWatchdog(upstream.Body, s.config.Server.StreamIdleTimeout)
+	defer watchdog.Stop()
 	for {
-		count, err := readWithIdleTimeout(upstream.Body, buffer, s.config.Server.StreamIdleTimeout)
+		count, err := upstream.Body.Read(buffer)
+		if watchdog.Expired() {
+			err = context.DeadlineExceeded
+		}
 		if count > 0 {
 			if firstByte == 0 {
 				firstByte = time.Since(started)
@@ -425,13 +458,10 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
 				return false, firstByte
 			}
-			streamTail = append(streamTail, buffer[:count]...)
-			if bytes.Contains(streamTail, []byte("data: [DONE]")) {
+			if streamContainsDone(&streamTail, &tailLength, buffer[:count]) {
 				done = true
 			}
-			if len(streamTail) > len("data: [DONE]")+2 {
-				streamTail = streamTail[len(streamTail)-(len("data: [DONE]")+2):]
-			}
+			watchdog.Reset()
 			if canFlush {
 				flusher.Flush()
 			}
@@ -442,34 +472,106 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	}
 }
 
+const doneMarker = "data: [DONE]"
+
+func streamContainsDone(tail *[len(doneMarker) - 1]byte, tailLength *int, chunk []byte) bool {
+	if bytes.Contains(chunk, []byte(doneMarker)) {
+		updateStreamTail(tail, tailLength, chunk)
+		return true
+	}
+	for split := 1; split < len(doneMarker) && split <= *tailLength && split <= len(chunk); split++ {
+		if bytes.Equal(tail[*tailLength-split:*tailLength], []byte(doneMarker)[:split]) && bytes.HasPrefix(chunk, []byte(doneMarker)[split:]) {
+			updateStreamTail(tail, tailLength, chunk)
+			return true
+		}
+	}
+	updateStreamTail(tail, tailLength, chunk)
+	return false
+}
+
+func updateStreamTail(tail *[len(doneMarker) - 1]byte, tailLength *int, chunk []byte) {
+	keep := len(doneMarker) - 1
+	if len(chunk) >= keep {
+		copy(tail[:], chunk[len(chunk)-keep:])
+		*tailLength = keep
+		return
+	}
+	if *tailLength+len(chunk) > keep {
+		shift := *tailLength + len(chunk) - keep
+		copy(tail[:], tail[shift:*tailLength])
+		*tailLength -= shift
+	}
+	copy(tail[*tailLength:], chunk)
+	*tailLength += len(chunk)
+}
+
 func (s *Server) recordDuration(target *atomic.Uint64, duration time.Duration) {
 	if milliseconds := duration.Milliseconds(); milliseconds > 0 {
 		target.Add(uint64(milliseconds)) // #nosec G115 -- duration is non-negative and bounded by process lifetime.
 	}
 }
 
-func readWithIdleTimeout(reader io.ReadCloser, buffer []byte, timeout time.Duration) (int, error) {
+type streamWatchdog struct {
+	reader  io.ReadCloser
+	reset   chan struct{}
+	stop    chan struct{}
+	expired atomic.Bool
+	done    chan struct{}
+}
+
+func newStreamWatchdog(reader io.ReadCloser, timeout time.Duration) *streamWatchdog {
+	watchdog := &streamWatchdog{reader: reader, reset: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
 	if timeout <= 0 {
-		return reader.Read(buffer)
+		close(watchdog.done)
+		return watchdog
 	}
-	type readResult struct {
-		count int
-		err   error
-	}
-	resultCh := make(chan readResult, 1)
 	go func() {
-		count, err := reader.Read(buffer)
-		resultCh <- readResult{count: count, err: err}
+		defer close(watchdog.done)
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-watchdog.reset:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(timeout)
+			case <-timer.C:
+				watchdog.expired.Store(true)
+				_ = reader.Close()
+				return
+			case <-watchdog.stop:
+				return
+			}
+		}
 	}()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	return watchdog
+}
+
+func (w *streamWatchdog) Reset() {
 	select {
-	case result := <-resultCh:
-		return result.count, result.err
-	case <-timer.C:
-		_ = reader.Close()
-		return 0, context.DeadlineExceeded
+	case w.reset <- struct{}{}:
+	default:
 	}
+}
+
+func (w *streamWatchdog) Expired() bool { return w.expired.Load() }
+
+func (w *streamWatchdog) Stop() {
+	select {
+	case <-w.done:
+		return
+	default:
+	}
+	select {
+	case <-w.stop:
+	default:
+		close(w.stop)
+	}
+	<-w.done
 }
 
 func readBounded(reader io.Reader, limit int64) ([]byte, bool) {
@@ -513,6 +615,7 @@ func normalizeEmbeddingResponse(requestBody, responseBody []byte) ([]byte, error
 		return nil, fmt.Errorf("provider returned %d embeddings for %d inputs", len(response), expected)
 	}
 	dimension := 0
+	needsNormalization := false
 	seen := make(map[int]struct{}, len(response))
 	for _, item := range response {
 		if item.Index < 0 || item.Index >= expected {
@@ -522,6 +625,9 @@ func normalizeEmbeddingResponse(requestBody, responseBody []byte) ([]byte, error
 			return nil, fmt.Errorf("provider returned duplicate embedding index %d", item.Index)
 		}
 		seen[item.Index] = struct{}{}
+		if item.Index != len(seen)-1 {
+			needsNormalization = true
+		}
 		if len(item.Embedding) == 0 {
 			return nil, fmt.Errorf("provider returned an empty embedding at index %d", item.Index)
 		}
@@ -535,6 +641,9 @@ func normalizeEmbeddingResponse(requestBody, responseBody []byte) ([]byte, error
 				return nil, fmt.Errorf("provider returned a non-finite embedding value at index %d", item.Index)
 			}
 		}
+	}
+	if !needsNormalization {
+		return responseBody, nil
 	}
 	sort.Slice(response, func(left, right int) bool { return response[left].Index < response[right].Index })
 	ordered, err := json.Marshal(response)

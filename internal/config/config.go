@@ -25,16 +25,17 @@ type Config struct {
 
 // ServerConfig controls the HTTP server and resource limits.
 type ServerConfig struct {
-	Address               string        `yaml:"address"`
-	LogLevel              string        `yaml:"log_level"`
-	RequestTimeout        time.Duration `yaml:"-"`
-	RequestTimeoutText    string        `yaml:"request_timeout"`
-	StreamIdleTimeout     time.Duration `yaml:"-"`
-	StreamIdleTimeoutText string        `yaml:"stream_idle_timeout"`
-	MaxBodyBytes          int64         `yaml:"max_body_bytes"`
-	MaxResponseBytes      int64         `yaml:"max_response_bytes"`
-	MaxConcurrentRequests int           `yaml:"max_concurrent_requests"`
-	MaxConcurrentStreams  int           `yaml:"max_concurrent_streams"`
+	Address                 string        `yaml:"address"`
+	LogLevel                string        `yaml:"log_level"`
+	RequestTimeout          time.Duration `yaml:"-"`
+	RequestTimeoutText      string        `yaml:"request_timeout"`
+	StreamIdleTimeout       time.Duration `yaml:"-"`
+	StreamIdleTimeoutText   string        `yaml:"stream_idle_timeout"`
+	MaxBodyBytes            int64         `yaml:"max_body_bytes"`
+	MaxResponseBytes        int64         `yaml:"max_response_bytes"`
+	MaxConcurrentRequests   int           `yaml:"max_concurrent_requests"`
+	MaxConcurrentEmbeddings int           `yaml:"max_concurrent_embeddings"`
+	MaxConcurrentStreams    int           `yaml:"max_concurrent_streams"`
 }
 
 // AuthConfig controls gateway authentication.
@@ -121,14 +122,15 @@ func LoadFromEnvironmentWith(overrides Overrides) (Config, error) {
 func defaults() Config {
 	return Config{
 		Server: ServerConfig{
-			Address:               ":4000",
-			LogLevel:              "info",
-			RequestTimeoutText:    "60s",
-			StreamIdleTimeoutText: "30s",
-			MaxBodyBytes:          1 << 20,
-			MaxResponseBytes:      8 << 20,
-			MaxConcurrentRequests: 16,
-			MaxConcurrentStreams:  4,
+			Address:                 ":4000",
+			LogLevel:                "info",
+			RequestTimeoutText:      "60s",
+			StreamIdleTimeoutText:   "30s",
+			MaxBodyBytes:            1 << 20,
+			MaxResponseBytes:        8 << 20,
+			MaxConcurrentRequests:   16,
+			MaxConcurrentEmbeddings: 2,
+			MaxConcurrentStreams:    4,
 		},
 		Auth: AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
 		Providers: map[string]ProviderConfig{
@@ -174,6 +176,13 @@ func applyEnvironment(config *Config, env map[string]string) error {
 		}
 		config.Server.MaxConcurrentRequests = parsed
 	}
+	if value := env["GOFEATHERROUTE_MAX_CONCURRENT_EMBEDDINGS"]; value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("GOFEATHERROUTE_MAX_CONCURRENT_EMBEDDINGS must be an integer: %w", err)
+		}
+		config.Server.MaxConcurrentEmbeddings = parsed
+	}
 	if value := env["GOFEATHERROUTE_MAX_CONCURRENT_STREAMS"]; value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
@@ -202,6 +211,9 @@ func validate(config *Config, env map[string]string) error {
 	}
 	if config.Server.MaxConcurrentRequests <= 0 {
 		return errors.New("server.max_concurrent_requests must be positive")
+	}
+	if config.Server.MaxConcurrentEmbeddings <= 0 {
+		return errors.New("server.max_concurrent_embeddings must be positive")
 	}
 	if config.Server.MaxConcurrentStreams <= 0 {
 		return errors.New("server.max_concurrent_streams must be positive")

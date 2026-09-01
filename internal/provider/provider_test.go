@@ -127,3 +127,19 @@ func TestClientHonorsContextCancellation(t *testing.T) {
 		t.Fatal("expected cancellation error")
 	}
 }
+
+func TestClientReportsConnectionTiming(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	client := Client{Name: "test", BaseURL: server.URL, APIKey: "secret", HTTPClient: NewHTTPClient()}
+	result, err := client.Chat(context.Background(), []byte(`{"model":"test"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = result.Body.Close() }()
+	if result.FirstResponseDuration <= 0 {
+		t.Fatal("expected first response timing")
+	}
+}

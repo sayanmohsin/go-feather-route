@@ -36,6 +36,9 @@ fake_id="$("${compose[@]}" ps --quiet fake-provider)"
 gateway_url="http://127.0.0.1:${BENCHMARK_HOST_PORT}"
 gateway_image="$("${compose[@]}" images -q "$service" 2>/dev/null || true)"
 gateway_architecture="$(docker image inspect --format '{{.Architecture}}' "$gateway_image" 2>/dev/null || true)"
+gateway_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$gateway_image" 2>/dev/null || true)"
+gateway_image_size="$(docker image inspect --format '{{.Size}}' "$gateway_image" 2>/dev/null || true)"
+gateway_memory_limit="$(docker inspect --format '{{.HostConfig.Memory}}' "$gateway_id" 2>/dev/null || true)"
 host_architecture="$(uname -m)"
 case "$host_architecture" in
   x86_64) normalized_host_architecture="amd64" ;;
@@ -46,9 +49,9 @@ execution_mode="native"
 if [[ -n "$gateway_architecture" && "$gateway_architecture" != "$normalized_host_architecture" ]]; then
   execution_mode="emulated-or-translated"
 fi
-printf '{"gateway":"%s","operation":"%s","streaming":%s,"requests":%s,"concurrency":%s,"host_architecture":"%s","gateway_image_id":"%s","gateway_architecture":"%s","native_or_emulated":"%s"}\n' \
+printf '{"gateway":"%s","operation":"%s","streaming":%s,"requests":%s,"concurrency":%s,"host_architecture":"%s","gateway_image_id":"%s","gateway_image_digest":"%s","gateway_image_size_bytes":%s,"gateway_memory_limit_bytes":%s,"gateway_architecture":"%s","native_or_emulated":"%s"}\n' \
   "$target" "${BENCHMARK_OPERATION:-chat}" "${BENCHMARK_STREAMING:-false}" "${BENCHMARK_REQUESTS:-32}" "${BENCHMARK_CONCURRENCY:-1}" \
-  "$normalized_host_architecture" "$gateway_image" "$gateway_architecture" "$execution_mode" \
+  "$normalized_host_architecture" "$gateway_image" "$gateway_digest" "${gateway_image_size:-0}" "${gateway_memory_limit:-0}" "$gateway_architecture" "$execution_mode" \
   >"$result_dir/metadata.json"
 
 for attempt in $(seq 1 60); do
@@ -114,6 +117,7 @@ go run ./benchmarks/cmd/runner \
   -concurrency "${BENCHMARK_CONCURRENCY:-1}" \
   -operation "${BENCHMARK_OPERATION:-chat}" \
   -stream="${BENCHMARK_STREAMING:-false}" \
+  -warmup "${BENCHMARK_WARMUP:-0}" \
   -output "$result_dir/requests.json" &
 runner_pid=$!
 sample_resources &
@@ -125,4 +129,5 @@ wait "$sampler_pid" 2>/dev/null || true
 
 docker inspect "$gateway_id" >"$result_dir/gateway-inspect.json"
 docker inspect "$fake_id" >"$result_dir/fake-provider-inspect.json"
+docker inspect --format '{"restart_count":{{.RestartCount}},"oom_killed":{{.State.OOMKilled}},"status":"{{.State.Status}}"}' "$gateway_id" >"$result_dir/gateway-state.json"
 printf 'benchmark complete: %s\n' "$result_dir"
