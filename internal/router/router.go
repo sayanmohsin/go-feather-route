@@ -39,12 +39,16 @@ type Server struct {
 	requests           atomic.Uint64
 	errors             atomic.Uint64
 	active             atomic.Int64
+	activeChat         atomic.Int64
 	activeEmbeddings   atomic.Int64
 	activeStreams      atomic.Int64
 	streamsTotal       atomic.Uint64
 	streamCompleted    atomic.Uint64
 	streamAborted      atomic.Uint64
 	authFailures       atomic.Uint64
+	limitRejections    atomic.Uint64
+	cancellations      atomic.Uint64
+	providerErrors     atomic.Uint64
 	retries            atomic.Uint64
 	bytes              atomic.Uint64
 	durationMs         atomic.Uint64
@@ -53,6 +57,12 @@ type Server struct {
 	firstResponseMs    atomic.Uint64
 	selectionMs        atomic.Uint64
 	connectionMs       atomic.Uint64
+	streamMs           atomic.Uint64
+	retryReasons       map[string]*atomic.Uint64
+	requestHistogram   durationHistogram
+	upstreamHistogram  durationHistogram
+	firstByteHistogram durationHistogram
+	streamHistogram    durationHistogram
 	routeMu            sync.Mutex
 	routeStats         map[routeKey]*routeMetric
 }
@@ -66,6 +76,61 @@ type routeMetric struct {
 	requests atomic.Uint64
 	errors   atomic.Uint64
 	retries  atomic.Uint64
+	statuses map[int]*atomic.Uint64
+}
+
+const maxMetricLabelLength = 64
+
+func boundedMetricLabel(value string) string {
+	if value == "" || len(value) > maxMetricLabelLength {
+		return "other"
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != '_' && character != '-' && character != '.' && character != ':' {
+			return "other"
+		}
+	}
+	return value
+}
+
+func safeLogValue(value string) string {
+	if len(value) > maxMetricLabelLength {
+		value = value[:maxMetricLabelLength]
+	}
+	return strings.Map(func(character rune) rune {
+		if character == '\n' || character == '\r' || character == '\t' {
+			return ' '
+		}
+		if character < 0x20 || character == 0x7f {
+			return -1
+		}
+		return character
+	}, value)
+}
+
+var durationBucketsMilliseconds = [...]uint64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000}
+
+type durationHistogram struct {
+	buckets [len(durationBucketsMilliseconds) + 1]atomic.Uint64
+	count   atomic.Uint64
+	sum     atomic.Uint64
+}
+
+func (h *durationHistogram) observe(duration time.Duration) {
+	if duration < 0 {
+		return
+	}
+	milliseconds := uint64(duration / time.Millisecond) // #nosec G115 -- duration is non-negative and bounded by process lifetime.
+	h.count.Add(1)
+	h.sum.Add(milliseconds)
+	for index, boundary := range durationBucketsMilliseconds {
+		if milliseconds <= boundary {
+			h.buckets[index].Add(1)
+			return
+		}
+	}
+	h.buckets[len(durationBucketsMilliseconds)].Add(1)
 }
 
 // NewServer constructs a router server from validated configuration.
@@ -99,6 +164,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 		streamSemaphore:    make(chan struct{}, cfg.Server.MaxConcurrentStreams),
 		logger:             logger,
 		routeStats:         make(map[routeKey]*routeMetric),
+		retryReasons:       make(map[string]*atomic.Uint64),
 	}
 }
 
@@ -133,7 +199,8 @@ func (s *Server) Handler() http.Handler {
 			if durationMs > 0 {
 				s.durationMs.Add(uint64(durationMs)) // #nosec G115 -- duration is non-negative and bounded by the process lifetime.
 			}
-			s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "request_id", request.Header.Get("X-Request-ID"), "status", tracked.statusCode, "bytes", tracked.bytes, "duration_ms", durationMs)
+			s.requestHistogram.observe(duration)
+			s.logger.Info("request", "method", request.Method, "path", request.URL.Path, "request_id", safeLogValue(request.Header.Get("X-Request-ID")), "status", tracked.statusCode, "bytes", tracked.bytes, "duration_ms", durationMs)
 		}()
 		requestID := requestID(request.Header.Get("X-Request-ID"))
 		request.Header.Set("X-Request-ID", requestID)
@@ -181,12 +248,16 @@ func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 		"errors":                      s.errors.Load(),
 		"models":                      len(s.routes.Models()),
 		"active":                      s.active.Load(),
+		"active_chat":                 s.activeChat.Load(),
 		"active_embeddings":           s.activeEmbeddings.Load(),
 		"streams":                     s.activeStreams.Load(),
 		"streams_total":               s.streamsTotal.Load(),
 		"streams_completed":           s.streamCompleted.Load(),
 		"streams_aborted":             s.streamAborted.Load(),
 		"auth_failures":               s.authFailures.Load(),
+		"limit_rejections":            s.limitRejections.Load(),
+		"cancellations":               s.cancellations.Load(),
+		"provider_errors":             s.providerErrors.Load(),
 		"retries":                     s.retries.Load(),
 		"bytes":                       s.bytes.Load(),
 		"duration_ms":                 s.durationMs.Load(),
@@ -229,12 +300,16 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_errors_total %d\n", s.errors.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_models_total %d\n", len(s.config.Routes))
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_requests %d\n", s.active.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_active_chat_requests %d\n", s.activeChat.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_embeddings %d\n", s.activeEmbeddings.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_active_streams %d\n", s.activeStreams.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_total %d\n", s.streamsTotal.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_completed_total %d\n", s.streamCompleted.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_streams_aborted_total %d\n", s.streamAborted.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_auth_failures_total %d\n", s.authFailures.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_limit_rejections_total %d\n", s.limitRejections.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_cancellations_total %d\n", s.cancellations.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_provider_errors_total %d\n", s.providerErrors.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_retries_total %d\n", s.retries.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_response_bytes_total %d\n", s.bytes.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_request_duration_milliseconds_total %d\n", s.durationMs.Load())
@@ -243,14 +318,36 @@ func (s *Server) metrics(response http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(response, "go_feather_route_provider_selection_milliseconds_total %d\n", s.selectionMs.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_connection_establishment_milliseconds_total %d\n", s.connectionMs.Load())
 	_, _ = fmt.Fprintf(response, "go_feather_route_first_response_milliseconds_total %d\n", s.firstResponseMs.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_stream_duration_milliseconds_total %d\n", s.streamMs.Load())
+	s.writeHistogram(response, "request_duration_milliseconds", &s.requestHistogram)
+	s.writeHistogram(response, "upstream_duration_milliseconds", &s.upstreamHistogram)
+	s.writeHistogram(response, "first_byte_milliseconds", &s.firstByteHistogram)
+	s.writeHistogram(response, "stream_duration_milliseconds", &s.streamHistogram)
 	s.routeMu.Lock()
+	for reason, metric := range s.retryReasons {
+		_, _ = fmt.Fprintf(response, "go_feather_route_retries_by_reason_total{reason=\"%s\"} %d\n", escapeMetricLabel(reason), metric.Load())
+	}
 	defer s.routeMu.Unlock()
 	for key, metric := range s.routeStats {
 		labels := fmt.Sprintf(`provider="%s",model="%s"`, escapeMetricLabel(key.provider), escapeMetricLabel(key.model))
 		_, _ = fmt.Fprintf(response, "go_feather_route_upstream_requests_total{%s} %d\n", labels, metric.requests.Load())
 		_, _ = fmt.Fprintf(response, "go_feather_route_upstream_errors_total{%s} %d\n", labels, metric.errors.Load())
 		_, _ = fmt.Fprintf(response, "go_feather_route_upstream_retries_total{%s} %d\n", labels, metric.retries.Load())
+		for status, statusMetric := range metric.statuses {
+			_, _ = fmt.Fprintf(response, "go_feather_route_upstream_status_total{%s,status=\"%d\"} %d\n", labels, status, statusMetric.Load())
+		}
 	}
+}
+
+func (s *Server) writeHistogram(response http.ResponseWriter, name string, histogram *durationHistogram) {
+	var cumulative uint64
+	for index, boundary := range durationBucketsMilliseconds {
+		cumulative += histogram.buckets[index].Load()
+		_, _ = fmt.Fprintf(response, "go_feather_route_%s_bucket{le=\"%d\"} %d\n", name, boundary, cumulative)
+	}
+	_, _ = fmt.Fprintf(response, "go_feather_route_%s_bucket{le=\"+Inf\"} %d\n", name, histogram.count.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_%s_sum %d\n", name, histogram.sum.Load())
+	_, _ = fmt.Fprintf(response, "go_feather_route_%s_count %d\n", name, histogram.count.Load())
 }
 
 func escapeMetricLabel(value string) string {
@@ -258,9 +355,12 @@ func escapeMetricLabel(value string) string {
 }
 
 func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
+	s.activeChat.Add(1)
+	defer s.activeChat.Add(-1)
 	request.Body = http.MaxBytesReader(response, request.Body, s.config.Server.MaxBodyBytes)
 	body, err := io.ReadAll(request.Body)
 	if err != nil {
+		s.limitRejections.Add(1)
 		s.writeError(response, http.StatusRequestEntityTooLarge, "request body is too large or unreadable")
 		return
 	}
@@ -284,6 +384,8 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	case concurrency <- struct{}{}:
 		defer func() { <-concurrency }()
 	case <-request.Context().Done():
+		s.cancellations.Add(1)
+		s.limitRejections.Add(1)
 		s.writeError(response, http.StatusRequestTimeout, "request canceled")
 		return
 	}
@@ -292,8 +394,14 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
 	upstreamStarted := time.Now()
 	upstream, err := client.Chat(ctx, body, envelope.Stream)
-	s.recordDuration(&s.upstreamMs, time.Since(upstreamStarted))
+	upstreamDuration := time.Since(upstreamStarted)
+	s.recordDuration(&s.upstreamMs, upstreamDuration)
+	s.upstreamHistogram.observe(upstreamDuration)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.cancellations.Add(1)
+		}
+		s.providerErrors.Add(1)
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -307,17 +415,32 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		defer s.activeStreams.Add(-1)
 	}
 	s.retries.Add(retryCount(upstream.Attempts))
+	if upstream.RetryReason != "" {
+		s.recordRetryReason(upstream.RetryReason)
+		s.providerErrors.Add(1)
+	}
 	if upstream.StatusCode >= http.StatusBadRequest {
+		s.providerErrors.Add(1)
 		s.copyUpstreamError(response, upstream)
 		return
 	}
 	if envelope.Stream {
+		streamStarted := time.Now()
 		completed, firstByte := s.streamResponse(response, upstream)
-		s.recordDuration(&s.firstByteMs, firstByte)
+		streamDuration := time.Since(streamStarted)
+		s.recordDuration(&s.streamMs, streamDuration)
+		s.streamHistogram.observe(streamDuration)
+		if firstByte > 0 {
+			s.recordDuration(&s.firstByteMs, firstByte)
+			s.firstByteHistogram.observe(firstByte)
+		}
 		if completed {
 			s.streamCompleted.Add(1)
 		} else {
 			s.streamAborted.Add(1)
+			if request.Context().Err() != nil {
+				s.cancellations.Add(1)
+			}
 		}
 		return
 	}
@@ -336,9 +459,12 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) embeddings(response http.ResponseWriter, request *http.Request) {
+	s.activeEmbeddings.Add(1)
+	defer s.activeEmbeddings.Add(-1)
 	request.Body = http.MaxBytesReader(response, request.Body, s.config.Server.MaxBodyBytes)
 	body, err := io.ReadAll(request.Body)
 	if err != nil {
+		s.limitRejections.Add(1)
 		s.writeError(response, http.StatusRequestEntityTooLarge, "request body is too large or unreadable")
 		return
 	}
@@ -355,12 +481,12 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	concurrency := s.embeddingSemaphore
-	s.activeEmbeddings.Add(1)
-	defer s.activeEmbeddings.Add(-1)
 	select {
 	case concurrency <- struct{}{}:
 		defer func() { <-concurrency }()
 	case <-request.Context().Done():
+		s.cancellations.Add(1)
+		s.limitRejections.Add(1)
 		s.writeError(response, http.StatusRequestTimeout, "request canceled")
 		return
 	}
@@ -369,8 +495,14 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
 	upstreamStarted := time.Now()
 	upstream, err := client.Embedding(ctx, body)
-	s.recordDuration(&s.upstreamMs, time.Since(upstreamStarted))
+	upstreamDuration := time.Since(upstreamStarted)
+	s.recordDuration(&s.upstreamMs, upstreamDuration)
+	s.upstreamHistogram.observe(upstreamDuration)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.cancellations.Add(1)
+		}
+		s.providerErrors.Add(1)
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -379,7 +511,12 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	s.recordDuration(&s.firstResponseMs, upstream.FirstResponseDuration)
 	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	s.retries.Add(retryCount(upstream.Attempts))
+	if upstream.RetryReason != "" {
+		s.recordRetryReason(upstream.RetryReason)
+		s.providerErrors.Add(1)
+	}
 	if upstream.StatusCode >= http.StatusBadRequest {
+		s.providerErrors.Add(1)
 		s.copyUpstreamError(response, upstream)
 		return
 	}
@@ -400,18 +537,36 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 
 func (s *Server) recordRouteMetric(providerName, model string, status, attempts int) {
 	s.routeMu.Lock()
-	key := routeKey{provider: providerName, model: model}
+	key := routeKey{provider: boundedMetricLabel(providerName), model: boundedMetricLabel(model)}
 	metric := s.routeStats[key]
 	if metric == nil {
-		metric = &routeMetric{}
+		metric = &routeMetric{statuses: make(map[int]*atomic.Uint64)}
 		s.routeStats[key] = metric
+	}
+	statusMetric := metric.statuses[status]
+	if statusMetric == nil {
+		statusMetric = &atomic.Uint64{}
+		metric.statuses[status] = statusMetric
 	}
 	s.routeMu.Unlock()
 	metric.requests.Add(1)
+	statusMetric.Add(1)
 	if status >= http.StatusBadRequest {
 		metric.errors.Add(1)
 	}
 	metric.retries.Add(retryCount(attempts))
+}
+
+func (s *Server) recordRetryReason(reason string) {
+	reason = boundedMetricLabel(reason)
+	s.routeMu.Lock()
+	metric := s.retryReasons[reason]
+	if metric == nil {
+		metric = &atomic.Uint64{}
+		s.retryReasons[reason] = metric
+	}
+	s.routeMu.Unlock()
+	metric.Add(1)
 }
 
 func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provider.Response) {

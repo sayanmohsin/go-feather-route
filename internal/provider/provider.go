@@ -66,6 +66,7 @@ type Response struct {
 	Attempts              int
 	ConnectionDuration    time.Duration
 	FirstResponseDuration time.Duration
+	RetryReason           string
 }
 
 type requestIDContextKey struct{}
@@ -82,6 +83,7 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 	}
 	endpoint := strings.TrimRight(c.BaseURL, "/") + "/chat/completions"
 	var lastErr error
+	retryReason := ""
 	for attempt := 0; attempt < 2; attempt++ {
 		response, err := c.doChat(ctx, endpoint, body)
 		if err != nil {
@@ -90,10 +92,12 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 			return Response{}, err
 		}
 		response.Attempts = attempt + 1
+		response.RetryReason = retryReason
 		if response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests {
 			return response, nil
 		}
 		if attempt == 0 && !stream {
+			retryReason = retryReasonForStatus(response.StatusCode)
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
 			if err := waitForRetry(ctx, response.Header, attempt); err != nil {
@@ -114,6 +118,7 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 	}
 	endpoint := strings.TrimRight(c.BaseURL, "/") + "/embeddings"
 	var lastErr error
+	retryReason := ""
 	for attempt := 0; attempt < 2; attempt++ {
 		response, err := c.doJSON(ctx, endpoint, body, "application/json")
 		if err != nil {
@@ -122,10 +127,12 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 			return Response{}, err
 		}
 		response.Attempts = attempt + 1
+		response.RetryReason = retryReason
 		if response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests {
 			return response, nil
 		}
 		if attempt == 0 {
+			retryReason = retryReasonForStatus(response.StatusCode)
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
 			if err := waitForRetry(ctx, response.Header, attempt); err != nil {
@@ -136,6 +143,16 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 		return response, nil
 	}
 	return Response{}, lastErr
+}
+
+func retryReasonForStatus(status int) string {
+	if status == http.StatusTooManyRequests {
+		return "rate_limited"
+	}
+	if status >= http.StatusInternalServerError {
+		return "upstream_5xx"
+	}
+	return "other"
 }
 
 func waitForRetry(ctx context.Context, headers http.Header, attempt int) error {
