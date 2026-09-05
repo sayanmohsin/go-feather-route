@@ -479,11 +479,15 @@ func streamContainsDone(tail *[len(doneMarker) - 1]byte, tailLength *int, chunk 
 		updateStreamTail(tail, tailLength, chunk)
 		return true
 	}
-	for split := 1; split < len(doneMarker) && split <= *tailLength && split <= len(chunk); split++ {
-		if bytes.Equal(tail[*tailLength-split:*tailLength], []byte(doneMarker)[:split]) && bytes.HasPrefix(chunk, []byte(doneMarker)[split:]) {
-			updateStreamTail(tail, tailLength, chunk)
-			return true
-		}
+	// Only the previous marker-length suffix and the current marker-length
+	// prefix can form a marker across a read boundary. Keeping this bounded
+	// avoids allocations while correctly handling any split point.
+	var combined [2*len(doneMarker) - 1]byte
+	combinedLength := copy(combined[:], tail[:*tailLength])
+	combinedLength += copy(combined[combinedLength:], chunk)
+	if bytes.Contains(combined[:combinedLength], []byte(doneMarker)) {
+		updateStreamTail(tail, tailLength, chunk)
+		return true
 	}
 	updateStreamTail(tail, tailLength, chunk)
 	return false

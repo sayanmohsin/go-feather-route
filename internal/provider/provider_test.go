@@ -99,6 +99,27 @@ func TestClientDoesNotRetryStreaming(t *testing.T) {
 	}
 }
 
+func TestClientDoesNotRetryStreamingAfterOutputBegins(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		attempts++
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.WriteHeader(http.StatusInternalServerError)
+		_, _ = response.Write([]byte("data: {\"error\":\"partial\"}\n\n"))
+	}))
+	defer server.Close()
+
+	client := Client{Name: "test", BaseURL: server.URL, APIKey: "secret", HTTPClient: server.Client()}
+	result, err := client.Chat(context.Background(), []byte(`{"model":"test","stream":true}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = result.Body.Close() }()
+	if attempts != 1 || result.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("attempts=%d status=%d", attempts, result.StatusCode)
+	}
+}
+
 func TestClientRequiresAPIKey(t *testing.T) {
 	client := Client{Name: "test", BaseURL: "https://example.com", HTTPClient: http.DefaultClient}
 	_, err := client.Chat(context.Background(), nil, false)
