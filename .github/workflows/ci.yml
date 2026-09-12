@@ -55,13 +55,17 @@ jobs:
     name: Nice Code advisory review
     runs-on: ubuntu-latest
     continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Run Nice Code changed-file review
         run: npx --yes @sayanmohsin/nice-code@0.2.0 --project . --changed --ci --format sarif > nice-code.sarif
       - name: Upload Nice Code report
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
         with:
           sarif_file: nice-code.sarif
       - name: Publish Nice Code report artifact

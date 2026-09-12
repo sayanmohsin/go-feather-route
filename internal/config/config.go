@@ -139,9 +139,12 @@ func defaults() Config {
 		Auth: AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
 		Providers: map[string]ProviderConfig{
 			// These are provider URLs and environment variable names, not credentials.
-			"openai":   {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Kind: "openai-compatible", Models: []string{"gpt-4o-mini"}},       // #nosec G101 -- no secret value is embedded.
-			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Kind: "openai-compatible", Models: []string{"deepseek-chat"}}, // #nosec G101 -- no secret value is embedded.
-			"ollama":   {BaseURL: "http://127.0.0.1:11434/v1", APIKeyEnv: "OLLAMA_API_KEY", Kind: "ollama", Models: []string{"ollama-qwen3", "ollama-nomic-embed"}, ModelAliases: map[string]string{"ollama-qwen3": "qwen3:4b", "ollama-nomic-embed": "nomic-embed-text"}},
+			// #nosec G101 -- no secret value is embedded.
+			"openai": {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Kind: "openai-compatible", Models: []string{"gpt-4o-mini"}},
+			// #nosec G101 -- no secret value is embedded.
+			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Kind: "openai-compatible", Models: []string{"deepseek-chat"}},
+			// #nosec G101 -- the API key is an environment variable name, not a secret value.
+			"ollama": {BaseURL: "http://127.0.0.1:11434/v1", APIKeyEnv: "OLLAMA_API_KEY", Kind: "ollama", Models: []string{"ollama-qwen3", "ollama-nomic-embed"}, ModelAliases: map[string]string{"ollama-qwen3": "qwen3:4b", "ollama-nomic-embed": "nomic-embed-text"}},
 		},
 		Routes: map[string]string{"gpt-4o-mini": "openai", "deepseek-chat": "deepseek", "ollama-qwen3": "ollama", "ollama-nomic-embed": "ollama"},
 	}
