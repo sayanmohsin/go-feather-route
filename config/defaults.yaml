@@ -1,5 +1,6 @@
 server:
   address: ":4000"
+  diagnostics_address: ""
   log_level: "info"
   request_timeout: "60s"
   stream_idle_timeout: "30s"

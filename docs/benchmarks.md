@@ -61,6 +61,11 @@ Each run records:
 - final restart and OOM state;
 - image and container metadata.
 
+For M2 reliability investigations, pair the timed workload with a local
+`goroutine`, `heap`, or `goroutineleak` profile after stream cancellation and
+idle-timeout cases. Store profiles outside the repository and report them as
+diagnostic evidence, not benchmark results.
+
 Linux hosts may expose additional cgroup peak-memory and CPU-throttling data.
 Docker Desktop reports the VM resource envelope, so host and container values
 must be interpreted with the recorded platform and architecture.

@@ -13,7 +13,7 @@ GOSEC_VERSION := v2.29.0
 GOVULNCHECK_VERSION := v1.7.0
 GOLANGCILINT_VERSION := v2.13.2
 
-.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check nice-code nice-code-all nice-code-skills bench benchmark-go benchmark-litellm benchmark-deepseek build docker check
+.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check nice-code nice-code-all nice-code-skills bench benchmark-go benchmark-litellm benchmark-deepseek build docker profile-goroutines check
 
 tools:
 	mkdir -p $(TOOLS_BIN)
@@ -77,6 +77,11 @@ benchmark-litellm:
 
 benchmark-deepseek:
 	./scripts/benchmark-deepseek.sh
+
+profile-goroutines:
+	@echo "Start the gateway with GOFEATHERROUTE_PPROF_ADDR=127.0.0.1:6060, then run:"
+	@echo "go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine"
+	@echo "curl 'http://127.0.0.1:6060/debug/pprof/goroutineleak?debug=1'"
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/go-feather-route

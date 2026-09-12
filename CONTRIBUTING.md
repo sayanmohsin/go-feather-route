@@ -3,6 +3,9 @@
 Go Feather Route is a small, standard-library-first Go project. Keep the
 runtime dependency graph and memory behavior intentional.
 
+Use the Go 1.27.1 toolchain declared in `go.mod` for local development and
+Docker builds.
+
 Before opening a pull request:
 
 ```bash

@@ -23,6 +23,10 @@ go-feather-route -config /etc/go-feather-route/config.yaml -addr :4000
 The command-line values take precedence over environment variables. Other
 settings are configured through environment variables or YAML.
 
+The optional `server.diagnostics_address` YAML field is equivalent to
+`GOFEATHERROUTE_PPROF_ADDR`. It must use a loopback host such as
+`127.0.0.1:6060`; leave it empty to keep runtime profiling disabled.
+
 Validate configuration with:
 
 ```bash

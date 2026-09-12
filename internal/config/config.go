@@ -26,6 +26,7 @@ type Config struct {
 // ServerConfig controls the HTTP server and resource limits.
 type ServerConfig struct {
 	Address                 string        `yaml:"address"`
+	DiagnosticsAddress      string        `yaml:"diagnostics_address"`
 	LogLevel                string        `yaml:"log_level"`
 	RequestTimeout          time.Duration `yaml:"-"`
 	RequestTimeoutText      string        `yaml:"request_timeout"`
@@ -125,6 +126,7 @@ func defaults() Config {
 	return Config{
 		Server: ServerConfig{
 			Address:                 ":4000",
+			DiagnosticsAddress:      "",
 			LogLevel:                "info",
 			RequestTimeoutText:      "60s",
 			StreamIdleTimeoutText:   "30s",
@@ -166,6 +168,9 @@ func applyEnvironment(config *Config, env map[string]string) error {
 	}
 	if value := env["GOFEATHERROUTE_ADDR"]; value != "" {
 		config.Server.Address = value
+	}
+	if value := env["GOFEATHERROUTE_PPROF_ADDR"]; value != "" {
+		config.Server.DiagnosticsAddress = value
 	}
 	if value := env["GOFEATHERROUTE_LOG_LEVEL"]; value != "" {
 		config.Server.LogLevel = value

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sayanmohsin/go-feather-route/internal/config"
+	"github.com/sayanmohsin/go-feather-route/internal/diagnostics"
 	"github.com/sayanmohsin/go-feather-route/internal/router"
 )
 
@@ -39,6 +40,11 @@ func main() {
 		IdleTimeout:       90 * time.Second,
 		MaxHeaderBytes:    32 << 10,
 	}
+	diagnosticsServer, err := diagnostics.Start(cfg.Server.DiagnosticsAddress, logger)
+	if err != nil {
+		logger.Error("diagnostics server failed", "error", err)
+		os.Exit(1)
+	}
 	go func() {
 		logger.Info("server starting", "address", cfg.Server.Address)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -46,11 +52,25 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+	var diagnosticsErrors <-chan error
+	if diagnosticsServer != nil {
+		diagnosticsErrors = diagnosticsServer.Errors()
+	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	<-signals
+	select {
+	case <-signals:
+	case err := <-diagnosticsErrors:
+		if err != nil {
+			logger.Error("diagnostics server stopped", "error", err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := diagnosticsServer.Shutdown(ctx); err != nil {
+		logger.Error("diagnostics shutdown failed", "error", err)
+		os.Exit(1)
+	}
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("server shutdown failed", "error", err)
 		os.Exit(1)

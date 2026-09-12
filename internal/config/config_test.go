@@ -23,6 +23,16 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsAddressEnvironmentOverride(t *testing.T) {
+	config, err := Load("", map[string]string{"GOFEATHERROUTE_PPROF_ADDR": "127.0.0.1:6060"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server.DiagnosticsAddress != "127.0.0.1:6060" {
+		t.Fatalf("diagnostics address = %q", config.Server.DiagnosticsAddress)
+	}
+}
+
 func TestLoadIncludesOllamaAliases(t *testing.T) {
 	config, err := Load("", map[string]string{"OLLAMA_API_KEY": "ollama"})
 	if err != nil {
@@ -121,6 +131,7 @@ func TestEnvironmentExample(t *testing.T) {
 	for _, name := range []string{
 		"GOFEATHERROUTE_CONFIG_FILE",
 		"GOFEATHERROUTE_ADDR",
+		"GOFEATHERROUTE_PPROF_ADDR",
 		"GOFEATHERROUTE_LOG_LEVEL",
 		"GOFEATHERROUTE_REQUEST_TIMEOUT",
 		"GOFEATHERROUTE_STREAM_IDLE_TIMEOUT",

@@ -6,6 +6,7 @@ secret manager, or injected CI/runtime environment variables.
 | Variable | Purpose |
 | --- | --- |
 | `GOFEATHERROUTE_ADDR` | HTTP listen address |
+| `GOFEATHERROUTE_PPROF_ADDR` | Optional loopback-only pprof diagnostics address such as `127.0.0.1:6060`; empty disables diagnostics |
 | `GOFEATHERROUTE_API_KEY` | Incoming gateway bearer token |
 | `GOFEATHERROUTE_REQUEST_TIMEOUT` | Upstream timeout |
 | `GOFEATHERROUTE_MAX_BODY_BYTES` | Request size limit |

@@ -29,6 +29,20 @@ Health endpoints do not make paid provider calls. Readiness confirms local
 configuration only; provider availability should be monitored with a bounded
 synthetic request or provider-specific monitoring policy.
 
+## Optional runtime diagnostics
+
+Runtime profiling is disabled by default. For local debugging, set
+`GOFEATHERROUTE_PPROF_ADDR=127.0.0.1:6060` before starting the gateway. Only
+loopback addresses are accepted. This starts a separate diagnostics listener
+at `/debug/pprof/`; it does not add
+profiling routes to the gateway listener on port 4000.
+
+The Go 1.27 `goroutineleak` profile is available at
+`/debug/pprof/goroutineleak?debug=1`, alongside the standard goroutine, heap,
+allocation, block, mutex, and thread profiles. Keep this listener on loopback
+and disabled in production. Profiles can contain stack traces and must be
+handled as operational data.
+
 ## Container healthcheck
 
 The image healthcheck calls:

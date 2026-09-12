@@ -38,8 +38,11 @@ features:
     title: Provider isolation
     details: Provider credentials stay server-side behind one private gateway boundary.
   - icon: ◈
-    title: Thingd optional
-    details: Add data-aware capabilities through Thingd MCP without embedding Thingd in the router.
+    title: Thingd boundary
+    details: Planned data-aware capabilities through Thingd MCP without embedding Thingd in the router.
+  - icon: ⌁
+    title: Safe diagnostics
+    details: Optional loopback-only runtime profiles for investigating streams, cancellations, and goroutine leaks.
 ---
 
 <div class="benchmark-note">
@@ -80,16 +83,16 @@ flowchart LR
   <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/getting-started"><h3>Start routing</h3><p>Configure one provider and send an OpenAI-compatible request.</p></a>
   <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/docker"><h3>Deploy with Docker</h3><p>Use the non-root multi-architecture image with runtime-injected secrets.</p></a>
   <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/benchmarks"><h3>Measure the gateway</h3><p>Compare routing overhead and resource use with the pinned LiteLLM reference image.</p></a>
-  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/thingd-mcp"><h3>Connect Thingd later</h3><p>Keep the router standalone, then add data-aware capabilities through MCP.</p></a>
+  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/health"><h3>Inspect runtime health</h3><p>Check readiness, metrics, and opt-in loopback diagnostics for stalled streams.</p></a>
+  <a class="path-card" href="https://sayanmohsin.github.io/go-feather-route/thingd-mcp"><h3>Plan a Thingd boundary</h3><p>Keep the router standalone while defining a separate MCP capability boundary.</p></a>
 </div>
 
 ## Long-term direction
 
 The project is designed to remain a small operational boundary as its
-capabilities grow: more compatible providers, embeddings and multimodal
-requests, per-tenant quotas, usage metrics, health-aware routing, graceful
-degradation, memory-aware deployment profiles, and optional Thingd MCP data
-capabilities.
+capabilities grow: more compatible providers, multimodal requests, per-tenant
+quotas, usage metrics, health-aware routing, graceful degradation, memory-aware
+deployment profiles, and a planned Thingd MCP data boundary.
 
 ```mermaid
 flowchart TB
@@ -97,8 +100,8 @@ flowchart TB
     gateway --> chat[Chat and streaming]
     gateway --> models[Model discovery and aliases]
     gateway --> ops[Health, readiness, and metrics]
-    gateway -. future .-> embeddings[Embeddings and multimodal APIs]
-    gateway -. optional .-> thingd[Thingd MCP data capabilities]
+    gateway --> embeddings[Embeddings]
+    gateway -. planned, separate .-> thingd[Thingd MCP data capabilities]
 ```
 
 ## Start in one command

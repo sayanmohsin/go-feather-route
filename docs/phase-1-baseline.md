@@ -71,8 +71,9 @@ go test -run '^$' -bench=. -benchmem -benchtime=1s -count=1 ./internal/router
 ```
 
 Environment: macOS arm64, Apple M1 Max, Go 1.27.0, in-process deterministic
-fake provider. These numbers measure gateway code paths, not network or model
-latency.
+fake provider. Go 1.27.0 is retained here because this is historical baseline
+evidence; current development and Docker builds use Go 1.27.1. These numbers
+measure gateway code paths, not network or model latency.
 
 | Benchmark | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
@@ -87,8 +88,8 @@ latency.
 
 The harness was invoked separately for the immutable Go image and the pinned
 LiteLLM image with 16 requests, concurrency 4, and warmup 2. Docker Desktop
-stopped during builder-image metadata retrieval for
-`golang:1.27-bookworm` with a context deadline. Therefore this phase reports
+stopped during builder-image metadata retrieval for the historical
+`golang:1.27-bookworm` builder with a context deadline. Therefore this phase reports
 the following as unavailable rather than zero:
 
 - container p50/p95/p99 latency and throughput;

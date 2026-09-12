@@ -44,6 +44,11 @@ Use `DEEPSEEK_API_KEY` with the `deepseek-chat` model, or configure both keys
 to support both providers. For Doppler or another secret manager, inject the
 environment at process start rather than baking secrets into the image.
 
+The image includes the optional runtime diagnostics listener, but it is
+disabled unless `GOFEATHERROUTE_PPROF_ADDR` is explicitly set. Keep that
+variable unset in production; if enabled for a private container network, use
+a loopback address and do not publish its port publicly.
+
 ## Verify the container
 
 The image includes a healthcheck and exposes an unauthenticated liveliness

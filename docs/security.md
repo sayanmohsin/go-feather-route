@@ -6,4 +6,6 @@ responses.
 
 Use HTTPS between the gateway and remote providers, restrict network exposure,
 set explicit request and concurrency limits, and rotate credentials through the
-secret manager.
+secret manager. Runtime profiles can contain stack traces and operational
+metadata, so keep `GOFEATHERROUTE_PPROF_ADDR` empty in production and never
+publish the loopback diagnostics port.
