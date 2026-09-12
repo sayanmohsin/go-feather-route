@@ -25,6 +25,7 @@ import (
 	"github.com/sayanmohsin/go-feather-route/internal/contract"
 	"github.com/sayanmohsin/go-feather-route/internal/gateway"
 	"github.com/sayanmohsin/go-feather-route/internal/provider"
+	"github.com/sayanmohsin/go-feather-route/internal/usage"
 )
 
 // Server routes authenticated client requests to configured providers.
@@ -32,10 +33,14 @@ type Server struct {
 	config             config.Config
 	routes             gateway.Routes
 	providers          map[string]provider.ClientAPI
+	providerCooldown   map[string]time.Time
+	providerFailures   map[string]int
+	routeMu            sync.Mutex
 	semaphore          chan struct{}
 	embeddingSemaphore chan struct{}
 	streamSemaphore    chan struct{}
 	logger             *slog.Logger
+	usageReporter      usage.Reporter
 	requests           atomic.Uint64
 	errors             atomic.Uint64
 	active             atomic.Int64
@@ -63,7 +68,6 @@ type Server struct {
 	upstreamHistogram  durationHistogram
 	firstByteHistogram durationHistogram
 	streamHistogram    durationHistogram
-	routeMu            sync.Mutex
 	routeStats         map[routeKey]*routeMetric
 }
 
@@ -166,10 +170,13 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 		config:             cfg,
 		routes:             gateway.NewRoutesWithRules(cfg.Routes, rules),
 		providers:          providers,
+		providerCooldown:   make(map[string]time.Time),
+		providerFailures:   make(map[string]int),
 		semaphore:          make(chan struct{}, cfg.Server.MaxConcurrentRequests),
 		embeddingSemaphore: make(chan struct{}, cfg.Server.MaxConcurrentEmbeddings),
 		streamSemaphore:    make(chan struct{}, cfg.Server.MaxConcurrentStreams),
 		logger:             logger,
+		usageReporter:      usage.Reporter{Endpoint: cfg.Usage.Endpoint, APIKey: cfg.Usage.APIKey, Timeout: cfg.Usage.Timeout},
 		routeStats:         make(map[routeKey]*routeMetric),
 		retryReasons:       make(map[string]*atomic.Uint64),
 	}
@@ -377,7 +384,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	selectionStarted := time.Now()
-	client, err := s.clientFor(envelope.Model)
+	clients, err := s.clientsFor(envelope.Model)
 	s.recordDuration(&s.selectionMs, time.Since(selectionStarted))
 	if err != nil {
 		s.writeError(response, http.StatusBadRequest, err.Error())
@@ -400,7 +407,27 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	defer cancel()
 	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
 	upstreamStarted := time.Now()
-	upstream, err := client.Chat(ctx, body, envelope.Stream)
+	var upstream provider.Response
+	var selectedClient provider.ClientAPI
+	selectedIndex := 0
+	for index, candidate := range clients {
+		candidateResponse, candidateErr := candidate.Chat(ctx, body, envelope.Stream)
+		if candidateErr != nil {
+			err = candidateErr
+			break
+		}
+		upstream = candidateResponse
+		selectedClient = candidate
+		selectedIndex = index
+		if !retryableUpstreamStatus(candidateResponse.StatusCode) || index == len(clients)-1 {
+			if candidateResponse.StatusCode < http.StatusBadRequest {
+				s.markProviderSuccess(candidate.ProviderName())
+			}
+			break
+		}
+		_ = candidateResponse.Body.Close()
+		s.markProviderFailure(candidate.ProviderName())
+	}
 	upstreamDuration := time.Since(upstreamStarted)
 	s.recordDuration(&s.upstreamMs, upstreamDuration)
 	s.upstreamHistogram.observe(upstreamDuration)
@@ -415,7 +442,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	defer func() { _ = upstream.Body.Close() }()
 	s.recordDuration(&s.connectionMs, upstream.ConnectionDuration)
 	s.recordDuration(&s.firstResponseMs, upstream.FirstResponseDuration)
-	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
+	s.recordRouteMetric(selectedClient.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	if envelope.Stream {
 		s.activeStreams.Add(1)
 		s.streamsTotal.Add(1)
@@ -433,7 +460,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 	}
 	if envelope.Stream {
 		streamStarted := time.Now()
-		completed, firstByte := s.streamResponse(response, upstream)
+		completed, firstByte, streamUsage := s.streamResponseWithUsage(response, upstream)
 		streamDuration := time.Since(streamStarted)
 		s.recordDuration(&s.streamMs, streamDuration)
 		s.streamHistogram.observe(streamDuration)
@@ -443,6 +470,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		}
 		if completed {
 			s.streamCompleted.Add(1)
+			s.reportUsage(request, selectedClient.ProviderName(), envelope.Model, streamUsage, "completed", upstreamDuration, upstream.Attempts, selectedIndex > 0)
 		} else {
 			s.streamAborted.Add(1)
 			if request.Context().Err() != nil {
@@ -460,6 +488,7 @@ func (s *Server) chat(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
+	s.reportUsage(request, selectedClient.ProviderName(), envelope.Model, usage.ParseJSON(responseBody), "completed", upstreamDuration, upstream.Attempts, selectedIndex > 0)
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = response.Write(responseBody)
@@ -481,7 +510,7 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	selectionStarted := time.Now()
-	client, err := s.clientFor(envelope.Model)
+	clients, err := s.clientsFor(envelope.Model)
 	s.recordDuration(&s.selectionMs, time.Since(selectionStarted))
 	if err != nil {
 		s.writeError(response, http.StatusBadRequest, err.Error())
@@ -501,7 +530,27 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	defer cancel()
 	ctx = provider.WithRequestID(ctx, request.Header.Get("X-Request-ID"))
 	upstreamStarted := time.Now()
-	upstream, err := client.Embedding(ctx, body)
+	var upstream provider.Response
+	var selectedClient provider.ClientAPI
+	selectedIndex := 0
+	for index, candidate := range clients {
+		candidateResponse, candidateErr := candidate.Embedding(ctx, body)
+		if candidateErr != nil {
+			err = candidateErr
+			break
+		}
+		upstream = candidateResponse
+		selectedClient = candidate
+		selectedIndex = index
+		if !retryableUpstreamStatus(candidateResponse.StatusCode) || index == len(clients)-1 {
+			if candidateResponse.StatusCode < http.StatusBadRequest {
+				s.markProviderSuccess(candidate.ProviderName())
+			}
+			break
+		}
+		_ = candidateResponse.Body.Close()
+		s.markProviderFailure(candidate.ProviderName())
+	}
 	upstreamDuration := time.Since(upstreamStarted)
 	s.recordDuration(&s.upstreamMs, upstreamDuration)
 	s.upstreamHistogram.observe(upstreamDuration)
@@ -516,7 +565,7 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 	defer func() { _ = upstream.Body.Close() }()
 	s.recordDuration(&s.connectionMs, upstream.ConnectionDuration)
 	s.recordDuration(&s.firstResponseMs, upstream.FirstResponseDuration)
-	s.recordRouteMetric(client.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
+	s.recordRouteMetric(selectedClient.ProviderName(), envelope.Model, upstream.StatusCode, upstream.Attempts)
 	s.retries.Add(retryCount(upstream.Attempts))
 	if upstream.RetryReason != "" {
 		s.recordRetryReason(upstream.RetryReason)
@@ -537,6 +586,7 @@ func (s *Server) embeddings(response http.ResponseWriter, request *http.Request)
 		s.writeError(response, http.StatusBadGateway, err.Error())
 		return
 	}
+	s.reportUsage(request, selectedClient.ProviderName(), envelope.Model, usage.ParseJSON(responseBody), "completed", upstreamDuration, upstream.Attempts, selectedIndex > 0)
 	copyHeaders(response.Header(), upstream.Header)
 	response.WriteHeader(upstream.StatusCode)
 	_, _ = response.Write(responseBody)
@@ -588,6 +638,11 @@ func (s *Server) copyUpstreamError(response http.ResponseWriter, upstream provid
 }
 
 func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.Response) (bool, time.Duration) {
+	completed, firstByte, _ := s.streamResponseWithUsage(response, upstream)
+	return completed, firstByte
+}
+
+func (s *Server) streamResponseWithUsage(response http.ResponseWriter, upstream provider.Response) (bool, time.Duration, usage.Tokens) {
 	copyHeaders(response.Header(), upstream.Header)
 	if response.Header().Get("Content-Type") == "" {
 		response.Header().Set("Content-Type", "text/event-stream")
@@ -603,6 +658,8 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 	buffer := make([]byte, 32*1024)
 	started := time.Now()
 	var firstByte time.Duration
+	var streamUsage usage.Tokens
+	var usageTail string
 	var streamTail [len(doneMarker) - 1]byte
 	tailLength := 0
 	done := false
@@ -618,7 +675,14 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 				firstByte = time.Since(started)
 			}
 			if _, writeErr := response.Write(buffer[:count]); writeErr != nil {
-				return false, firstByte
+				return false, firstByte, streamUsage
+			}
+			usageTail += string(buffer[:count])
+			if separator := strings.LastIndex(usageTail, "\n\n"); separator >= 0 {
+				if parsed := usage.ParseSSE([]byte(usageTail[:separator+2])); parsed.Total > 0 {
+					streamUsage = parsed
+				}
+				usageTail = usageTail[separator+2:]
 			}
 			if streamContainsDone(&streamTail, &tailLength, buffer[:count]) {
 				done = true
@@ -629,7 +693,7 @@ func (s *Server) streamResponse(response http.ResponseWriter, upstream provider.
 			}
 		}
 		if err != nil {
-			return done && errors.Is(err, io.EOF), firstByte
+			return done && errors.Is(err, io.EOF), firstByte, streamUsage
 		}
 	}
 }
@@ -824,16 +888,120 @@ func normalizeEmbeddingResponse(requestBody, responseBody []byte) ([]byte, error
 	return normalized, nil
 }
 
-func (s *Server) clientFor(model string) (provider.ClientAPI, error) {
+func (s *Server) clientsFor(model string) ([]provider.ClientAPI, error) {
 	providerName, ok := s.routes.ProviderFor(model)
 	if !ok {
 		return nil, fmt.Errorf("no provider route configured for model %q", model)
 	}
-	client, ok := s.providers[providerName]
-	if !ok {
-		return nil, fmt.Errorf("no provider route configured for model %q", model)
+	providerNames := []string{providerName}
+	for _, route := range s.config.ModelList {
+		if route.ModelName == model {
+			providerNames = append(providerNames, route.Fallbacks...)
+			break
+		}
 	}
-	return client, nil
+	clients := make([]provider.ClientAPI, 0, len(providerNames))
+	var primary provider.ClientAPI
+	for _, name := range providerNames {
+		client, exists := s.providers[name]
+		if !exists {
+			continue
+		}
+		if primary == nil {
+			primary = client
+		}
+		if !s.providerAvailable(name) {
+			continue
+		}
+		clients = append(clients, client)
+	}
+	if len(clients) == 0 {
+		if primary == nil {
+			return nil, fmt.Errorf("no provider route configured for model %q", model)
+		}
+		// A cooldown must not make the request impossible when there is no
+		// alternate route; the upstream error remains visible to the caller.
+		clients = append(clients, primary)
+	}
+	return clients, nil
+}
+
+func (s *Server) clientFor(model string) (provider.ClientAPI, error) {
+	clients, err := s.clientsFor(model)
+	if err != nil {
+		return nil, err
+	}
+	return clients[0], nil
+}
+
+func retryableUpstreamStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
+func (s *Server) providerAvailable(name string) bool {
+	s.routeMu.Lock()
+	defer s.routeMu.Unlock()
+	until := s.providerCooldown[name]
+	return until.IsZero() || time.Now().After(until)
+}
+
+func (s *Server) markProviderFailure(name string) {
+	s.routeMu.Lock()
+	defer s.routeMu.Unlock()
+	s.providerFailures[name]++
+	if s.providerFailures[name] >= 2 {
+		s.providerCooldown[name] = time.Now().Add(5 * time.Second)
+		s.providerFailures[name] = 0
+	}
+}
+
+func (s *Server) markProviderSuccess(name string) {
+	s.routeMu.Lock()
+	defer s.routeMu.Unlock()
+	delete(s.providerFailures, name)
+	delete(s.providerCooldown, name)
+}
+
+func (s *Server) reportUsage(
+	request *http.Request,
+	providerName string,
+	model string,
+	tokens usage.Tokens,
+	status string,
+	duration time.Duration,
+	attempts int,
+	fallbackUsed bool,
+) {
+	inputCost, outputCost := s.modelCost(model)
+	cost := float64(tokens.Input)*inputCost/1_000_000 + float64(tokens.Output)*outputCost/1_000_000
+	event := usage.Event{
+		RequestID:     request.Header.Get("X-Request-ID"),
+		UserID:        request.Header.Get("X-Thingd-User-Id"),
+		ProjectID:     request.Header.Get("X-Thingd-Project-Id"),
+		InstanceID:    request.Header.Get("X-Thingd-Instance-Id"),
+		Operation:     request.Header.Get("X-Thingd-Operation"),
+		Gateway:       "go-feather-route",
+		Provider:      providerName,
+		Model:         model,
+		InputTokens:   tokens.Input,
+		OutputTokens:  tokens.Output,
+		TotalTokens:   tokens.Total,
+		EstimatedCost: cost,
+		Status:        status,
+		DurationMs:    duration.Milliseconds(),
+		AttemptCount:  attempts,
+		FallbackUsed:  fallbackUsed,
+	}
+	go s.usageReporter.Report(event)
+}
+
+func (s *Server) modelCost(model string) (float64, float64) {
+	for _, route := range s.config.ModelList {
+		if route.ModelName == model {
+			return route.InputCost, route.OutputCost
+		}
+	}
+	return 0, 0
 }
 
 func (s *Server) authorized(request *http.Request) bool {

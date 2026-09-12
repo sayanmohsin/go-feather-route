@@ -13,6 +13,11 @@ server:
 auth:
   api_key_env: "GOFEATHERROUTE_API_KEY"
 
+usage:
+  endpoint: ""
+  api_key_env: "GOFEATHERROUTE_USAGE_API_KEY"
+  timeout: "2s"
+
 providers:
   openai:
     base_url: "https://api.openai.com/v1"
@@ -31,6 +36,9 @@ model_list:
   - model_name: gpt-4o-mini
     provider: openai
     upstream_model: gpt-4o-mini
+    input_cost_per_million_tokens: 0
+    output_cost_per_million_tokens: 0
+    embedding_cost_per_million_tokens: 0
   - model_name: deepseek-chat
     provider: deepseek
     upstream_model: deepseek-chat

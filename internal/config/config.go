@@ -17,6 +17,7 @@ import (
 type Config struct {
 	Server     ServerConfig              `yaml:"server"`
 	Auth       AuthConfig                `yaml:"auth"`
+	Usage      UsageConfig               `yaml:"usage"`
 	Providers  map[string]ProviderConfig `yaml:"providers"`
 	ModelList  []ModelRoute              `yaml:"model_list"`
 	Routes     map[string]string         `yaml:"routes"`
@@ -28,9 +29,22 @@ type Config struct {
 // ModelRoute is a LiteLLM-style public model name mapped to a provider model.
 // Model names remain configuration data; the gateway does not hardcode them.
 type ModelRoute struct {
-	ModelName     string `yaml:"model_name"`
-	Provider      string `yaml:"provider"`
-	UpstreamModel string `yaml:"upstream_model"`
+	ModelName     string   `yaml:"model_name"`
+	Provider      string   `yaml:"provider"`
+	UpstreamModel string   `yaml:"upstream_model"`
+	Fallbacks     []string `yaml:"fallbacks"`
+	InputCost     float64  `yaml:"input_cost_per_million_tokens"`
+	OutputCost    float64  `yaml:"output_cost_per_million_tokens"`
+	EmbeddingCost float64  `yaml:"embedding_cost_per_million_tokens"`
+}
+
+// UsageConfig controls optional Cloud usage event delivery.
+type UsageConfig struct {
+	Endpoint    string        `yaml:"endpoint"`
+	APIKeyEnv   string        `yaml:"api_key_env"`
+	APIKey      string        `yaml:"-"`
+	TimeoutText string        `yaml:"timeout"`
+	Timeout     time.Duration `yaml:"-"`
 }
 
 // RouteRule maps arbitrary model names to a configured provider. A trailing
@@ -155,6 +169,7 @@ func defaults() Config {
 			MaxConcurrentStreams:    4,
 		},
 		Auth:       AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
+		Usage:      UsageConfig{APIKeyEnv: "GOFEATHERROUTE_USAGE_API_KEY", TimeoutText: "2s"},
 		Providers:  map[string]ProviderConfig{},
 		ModelList:  nil,
 		Routes:     map[string]string{},
@@ -215,6 +230,13 @@ func applyEnvironment(config *Config, env map[string]string) error {
 	if value := env["GOFEATHERROUTE_STREAM_IDLE_TIMEOUT"]; value != "" {
 		config.Server.StreamIdleTimeoutText = value
 	}
+	if value := env["GOFEATHERROUTE_USAGE_ENDPOINT"]; value != "" {
+		config.Usage.Endpoint = strings.TrimRight(value, "/")
+	}
+	if value := env["GOFEATHERROUTE_USAGE_TIMEOUT"]; value != "" {
+		config.Usage.TimeoutText = value
+	}
+	config.Usage.APIKey = env[config.Usage.APIKeyEnv]
 	if value := env["GOFEATHERROUTE_MAX_BODY_BYTES"]; value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
@@ -288,6 +310,11 @@ func validate(config *Config, env map[string]string) error {
 		return fmt.Errorf("server.stream_idle_timeout must be a positive duration: %q", config.Server.StreamIdleTimeoutText)
 	}
 	config.Server.StreamIdleTimeout = streamIdleTimeout
+	usageTimeout, err := time.ParseDuration(config.Usage.TimeoutText)
+	if err != nil || usageTimeout <= 0 {
+		return fmt.Errorf("usage.timeout must be a positive duration: %q", config.Usage.TimeoutText)
+	}
+	config.Usage.Timeout = usageTimeout
 	if !strings.Contains(config.Server.LogLevel, "debug") && config.Server.LogLevel != "info" && config.Server.LogLevel != "warn" && config.Server.LogLevel != "error" {
 		return fmt.Errorf("server.log_level must be debug, info, warn, or error: %q", config.Server.LogLevel)
 	}
@@ -319,6 +346,14 @@ func validate(config *Config, env map[string]string) error {
 		}
 		if _, ok := config.Providers[route.Provider]; !ok {
 			return fmt.Errorf("model_list.%s references unknown provider %q", route.ModelName, route.Provider)
+		}
+		for _, fallback := range route.Fallbacks {
+			if _, ok := config.Providers[fallback]; !ok {
+				return fmt.Errorf("model_list.%s references unknown fallback provider %q", route.ModelName, fallback)
+			}
+		}
+		if route.InputCost < 0 || route.OutputCost < 0 || route.EmbeddingCost < 0 {
+			return fmt.Errorf("model_list.%s cost values must not be negative", route.ModelName)
 		}
 	}
 	for _, rule := range config.RouteRules {

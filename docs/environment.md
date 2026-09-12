@@ -9,6 +9,10 @@ secret manager, or injected CI/runtime environment variables.
 | `GOFEATHERROUTE_PPROF_ADDR` | Optional loopback-only pprof diagnostics address such as `127.0.0.1:6060`; empty disables diagnostics |
 | `GOFEATHERROUTE_API_KEY` | Incoming gateway bearer token |
 | `GOFEATHERROUTE_REQUEST_TIMEOUT` | Upstream timeout |
+| `GOFEATHERROUTE_STREAM_IDLE_TIMEOUT` | Maximum idle gap in a streamed response |
+| `GOFEATHERROUTE_USAGE_ENDPOINT` | Optional internal usage-event callback URL |
+| `GOFEATHERROUTE_USAGE_API_KEY` | Secret for the usage-event callback |
+| `GOFEATHERROUTE_USAGE_TIMEOUT` | Usage callback deadline |
 | `GOFEATHERROUTE_MAX_BODY_BYTES` | Request size limit |
 | `GOFEATHERROUTE_MAX_CONCURRENT_REQUESTS` | Concurrency limit |
 | `GOFEATHERROUTE_ALLOW_INSECURE_HTTP` | Benchmark-only HTTP fake-provider opt-in; keep disabled in production |

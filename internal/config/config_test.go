@@ -102,6 +102,36 @@ route_rules:
 	}
 }
 
+func TestLoadModelRouteKeepsFallbackAndPricingConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte(`providers:
+  primary:
+    base_url: https://primary.example/v1
+    api_key_env: PRIMARY_KEY
+  backup:
+    base_url: https://backup.example/v1
+    api_key_env: BACKUP_KEY
+model_list:
+  - model_name: arbitrary-chat
+    provider: primary
+    upstream_model: vendor-chat
+    fallbacks: [backup]
+    input_cost_per_million_tokens: 0.25
+    output_cost_per_million_tokens: 1.25
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path, map[string]string{"PRIMARY_KEY": "primary", "BACKUP_KEY": "backup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := loaded.ModelList[0]
+	if len(route.Fallbacks) != 1 || route.Fallbacks[0] != "backup" || route.InputCost != 0.25 || route.OutputCost != 1.25 {
+		t.Fatalf("route=%+v", route)
+	}
+}
+
 func TestCLIOverridesEnvironmentAndYAML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("server:\n  address: :4200\n"), 0o600); err != nil {

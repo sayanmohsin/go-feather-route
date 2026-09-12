@@ -106,6 +106,37 @@ func TestChatPreservesProviderErrorBodyAndStatus(t *testing.T) {
 	}
 }
 
+func TestChatUsesOrderedFallbackAfterRetryableStatus(t *testing.T) {
+	var primaryCalls, fallbackCalls int
+	primary := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		primaryCalls++
+		response.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		fallbackCalls++
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"id":"fallback","choices":[]}`))
+	}))
+	defer fallback.Close()
+
+	cfg := config.Config{
+		Server:    config.ServerConfig{RequestTimeout: time.Second, MaxBodyBytes: 1024, MaxConcurrentRequests: 1},
+		Providers: map[string]config.ProviderConfig{"primary": {BaseURL: primary.URL, APIKey: "primary"}, "fallback": {BaseURL: fallback.URL, APIKey: "fallback"}},
+		ModelList: []config.ModelRoute{{ModelName: "test-model", Provider: "primary", Fallbacks: []string{"fallback"}}},
+		Routes:    map[string]string{"test-model": "primary"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[]}`))
+	response := httptest.NewRecorder()
+	NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "fallback") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if primaryCalls != 2 || fallbackCalls != 1 {
+		t.Fatalf("calls primary=%d fallback=%d", primaryCalls, fallbackCalls)
+	}
+}
+
 func TestEmbeddingsPreserveProviderErrorBodyAndStatus(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")

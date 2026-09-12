@@ -23,11 +23,13 @@ database, queue, dashboard, or large platform runtime.
 
 - OpenAI-compatible Chat Completions and embeddings requests and errors.
 - Configurable provider base URLs and model aliases.
+- Ordered configured fallbacks, retryable-status routing, and provider cooldowns.
 - Non-streaming and Server-Sent Events streaming responses.
 - Bounded request bodies, timeouts, retries, and concurrent work.
 - Liveness, readiness, status, model status, Prometheus-style metrics, and
   opt-in private runtime diagnostics.
 - Provider credentials supplied only at runtime through environment injection.
+- Optional sanitized token, cost, latency, and routing usage events for Cloud.
 - Static, non-root, multi-architecture Docker images.
 - Planned Thingd MCP integration as a separate capability boundary, never a
   core dependency.
@@ -125,11 +127,11 @@ exposes those measurements. The homepage shows a concise summary; the full
 [benchmark methodology and results](docs/benchmarks.md) explain platform and
 architecture context before the numbers are interpreted.
 
-A preliminary Thingd Cloud canary also returned 10/10 successful chat requests
+A preliminary Thingd Cloud canary returned 10/10 successful chat requests
 through both gateways and showed lower Go Feather Route p95 latency and
-streaming time-to-first-byte in that sample. Embeddings and comparable resource
-usage were not yet qualified, so this result does not by itself justify
-replacing LiteLLM. See the [Cloud canary results](docs/benchmarks.md#thingd-cloud-canary).
+streaming time-to-first-byte in that sample. Re-run the documented comparison
+after changing routes or provider models; the canary is not a substitute for
+production monitoring. See the [Cloud canary results](docs/benchmarks.md#thingd-cloud-canary).
 
 ## Long-term direction
 

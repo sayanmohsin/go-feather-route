@@ -45,6 +45,9 @@ model_list:
   - model_name: deepseek-chat
     provider: deepseek
     upstream_model: deepseek-chat
+    fallbacks: [ollama]
+    input_cost_per_million_tokens: 0.14
+    output_cost_per_million_tokens: 0.28
 
 route_rules:
   - match: deepseek/*
@@ -59,3 +62,14 @@ Provider API keys are injected through the variable named by `api_key_env`.
 In production, keep those variables in Doppler. For local development, the
 same variables may be supplied through the shell or a local env file; the
 gateway does not require Open Envault.
+
+`fallbacks` is an ordered list of provider names. A retryable upstream response
+(429 or 5xx) can advance to the next available provider; ambiguous transport
+failures are never replayed. Providers that repeatedly fail enter a short
+cooldown. Pricing values are USD per million tokens and are used only when the
+upstream does not provide cost metadata.
+
+Optional sanitized usage delivery is configured with `usage.endpoint`,
+`usage.api_key_env`, and `usage.timeout`. Usage events contain request and
+routing metadata, token counts, timing, status, and cost only; prompts,
+responses, and credentials are never reported.

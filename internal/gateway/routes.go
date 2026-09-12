@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// Rule maps an exact or prefix model pattern to a provider.
 type Rule struct {
 	Match    string
 	Provider string
@@ -23,6 +24,7 @@ func NewRoutes(routes map[string]string) Routes {
 	return NewRoutesWithRules(routes, nil)
 }
 
+// NewRoutesWithRules copies route and pattern configuration into an immutable table.
 func NewRoutesWithRules(routes map[string]string, rules []Rule) Routes {
 	copyOfRoutes := make(map[string]string, len(routes))
 	for model, provider := range routes {
