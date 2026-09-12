@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,60 @@ import (
 	"testing"
 	"time"
 )
+
+func TestOllamaClientMapsAliasesAndDisablesThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "qwen3:4b" {
+			t.Fatalf("model = %v", body["model"])
+		}
+		if body["think"] != false {
+			t.Fatalf("think = %v", body["think"])
+		}
+		if _, ok := body["reasoning_effort"]; ok {
+			t.Fatal("reasoning_effort should be translated for Ollama")
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"id":"ollama","choices":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("ollama", server.URL, "ollama", server.Client())
+	client.Kind = "ollama"
+	client.ModelAliases = map[string]string{"ollama-qwen3": "qwen3:4b"}
+	result, err := client.Chat(context.Background(), []byte(`{"model":"ollama-qwen3","messages":[],"reasoning_effort":"none"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = result.Body.Close() }()
+}
+
+func TestOllamaClientMapsEmbeddingAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "nomic-embed-text" {
+			t.Fatalf("model = %v", body["model"])
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("ollama", server.URL, "ollama", server.Client())
+	client.Kind = "ollama"
+	client.ModelAliases = map[string]string{"ollama-nomic-embed": "nomic-embed-text"}
+	result, err := client.Embedding(context.Background(), []byte(`{"model":"ollama-nomic-embed","input":["hello"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = result.Body.Close() }()
+}
 
 func TestClientRetriesRetryableNonStreamingResponse(t *testing.T) {
 	attempts := 0

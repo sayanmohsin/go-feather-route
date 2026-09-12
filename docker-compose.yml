@@ -7,10 +7,14 @@ services:
     image: go-feather-route:dev
     ports:
       - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       GOFEATHERROUTE_API_KEY: ${GOFEATHERROUTE_API_KEY:?GOFEATHERROUTE_API_KEY must be set}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-ollama}
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://host.docker.internal:11434/v1}
     restart: unless-stopped
     read_only: true
     security_opt:

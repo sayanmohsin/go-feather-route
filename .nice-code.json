@@ -1,0 +1,6 @@
+{
+  "profiles": ["default"],
+  "ignore": ["bin/**", "coverage.out", "docs/.vitepress/dist/**", "vendor/**"],
+  "severity": {},
+  "exceptions": []
+}

@@ -7,16 +7,16 @@ not a migration announcement. Cloud remains on LiteLLM.
 | Area | Status | Evidence or remaining work | Priority |
 | --- | --- | --- | --- |
 | Chat endpoint and OpenAI request shape | Supported | Router forwards the bounded request body to `/v1/chat/completions` | P0 |
-| JSON-object responses | Partial | `response_format` is forwarded; add Cloud-shaped fixture assertions | P0 |
-| Model aliases and provider routing | Supported | Configuration routes model aliases to provider clients | P0 |
+| JSON-object responses | Partial | `response_format` is forwarded; add Cloud-shaped fixture assertions for Ollama | P0 |
+| Model aliases and provider routing | Supported | Configuration routes aliases and translates Ollama aliases to upstream model names | P0 |
 | Gateway authentication | Supported | Protected API endpoints require the gateway bearer key | P0 |
 | Provider authentication | Supported | Provider keys are injected at runtime and sent upstream | P0 |
 | Non-streaming usage passthrough | Supported | Upstream response and headers are copied within response limits | P0 |
-| Streaming SSE forwarding | Partial | Forwarding and termination exist; verify Cloud stream parsing and final usage | P0 |
+| Streaming SSE forwarding | Partial | Forwarding and termination exist; verify Cloud stream parsing and final usage with Ollama | P0 |
 | Client cancellation | Partial | Request context is propagated; add provider-observed cancellation fixture | P0 |
 | Bounded retries | Supported | Retry policy covers transport errors and retryable upstream statuses | P1 |
 | Timeout behavior | Supported | Request context uses the configured upstream timeout | P1 |
-| Embedding endpoint | Supported | Single and batch forwarding plus response validation tests exist | P0 |
+| Embedding endpoint | Supported | Single and batch forwarding plus response validation tests exist; Ollama alias mapping is covered | P0 |
 | Embedding worker payloads | Not verified | Replay the Cloud worker-shaped batch and failure cases | P0 |
 | Project memory workloads | Not verified | Validate indexing, retrieval, dimensions, and rebuild behavior through the gateway | P0 |
 | OpenAI-compatible errors | Partial | Error forwarding exists; compare exact Cloud error parsing and status expectations | P1 |

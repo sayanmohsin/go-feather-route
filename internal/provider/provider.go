@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	cryptorand "crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
@@ -18,10 +19,12 @@ import (
 
 // Client sends OpenAI-compatible requests to one provider.
 type Client struct {
-	Name       string
-	BaseURL    string
-	APIKey     string
-	HTTPClient *http.Client
+	Name         string
+	BaseURL      string
+	APIKey       string
+	Kind         string
+	ModelAliases map[string]string
+	HTTPClient   *http.Client
 }
 
 // ClientAPI is the provider capability required by the gateway.
@@ -50,7 +53,7 @@ func NewClient(name, baseURL, apiKey string, httpClient *http.Client) Client {
 	if httpClient == nil {
 		httpClient = NewHTTPClient()
 	}
-	return Client{Name: name, BaseURL: baseURL, APIKey: apiKey, HTTPClient: httpClient}
+	return Client{Name: name, BaseURL: baseURL, APIKey: apiKey, Kind: "openai-compatible", HTTPClient: httpClient}
 }
 
 // ProviderName identifies the configured provider for observability labels.
@@ -85,7 +88,11 @@ func (c Client) Chat(ctx context.Context, body []byte, stream bool) (Response, e
 	var lastErr error
 	retryReason := ""
 	for attempt := 0; attempt < 2; attempt++ {
-		response, err := c.doChat(ctx, endpoint, body)
+		preparedBody, err := c.prepareChatBody(body)
+		if err != nil {
+			return Response{}, err
+		}
+		response, err := c.doChat(ctx, endpoint, preparedBody)
 		if err != nil {
 			// A transport error is ambiguous: the provider may have accepted the
 			// request before the connection failed. Do not duplicate a POST.
@@ -120,7 +127,11 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 	var lastErr error
 	retryReason := ""
 	for attempt := 0; attempt < 2; attempt++ {
-		response, err := c.doJSON(ctx, endpoint, body, "application/json")
+		preparedBody, err := c.prepareModelBody(body)
+		if err != nil {
+			return Response{}, err
+		}
+		response, err := c.doJSON(ctx, endpoint, preparedBody, "application/json")
 		if err != nil {
 			// Embedding POSTs are also unsafe to replay after an ambiguous
 			// transport failure.
@@ -143,6 +154,54 @@ func (c Client) Embedding(ctx context.Context, body []byte) (Response, error) {
 		return response, nil
 	}
 	return Response{}, lastErr
+}
+
+func (c Client) prepareChatBody(body []byte) ([]byte, error) {
+	prepared, err := c.prepareModelBody(body)
+	if err != nil {
+		return nil, err
+	}
+	if c.Kind != "ollama" {
+		return prepared, nil
+	}
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(prepared, &request); err != nil {
+		return nil, fmt.Errorf("prepare Ollama chat request: %w", err)
+	}
+	var reasoningEffort string
+	if value, ok := request["reasoning_effort"]; ok {
+		_ = json.Unmarshal(value, &reasoningEffort)
+	}
+	if reasoningEffort == "none" {
+		request["think"] = json.RawMessage("false")
+		delete(request, "reasoning_effort")
+	}
+	return json.Marshal(request)
+}
+
+func (c Client) prepareModelBody(body []byte) ([]byte, error) {
+	if len(c.ModelAliases) == 0 {
+		return body, nil
+	}
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil, fmt.Errorf("prepare provider request: %w", err)
+	}
+	var model string
+	if value, ok := request["model"]; ok {
+		if err := json.Unmarshal(value, &model); err != nil {
+			return nil, fmt.Errorf("prepare provider model: %w", err)
+		}
+	}
+	if providerModel, ok := c.ModelAliases[model]; ok {
+		encoded, err := json.Marshal(providerModel)
+		if err != nil {
+			return nil, fmt.Errorf("prepare provider model: %w", err)
+		}
+		request["model"] = encoded
+		return json.Marshal(request)
+	}
+	return body, nil
 }
 
 func retryReasonForStatus(status int) string {

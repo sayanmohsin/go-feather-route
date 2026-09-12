@@ -58,6 +58,12 @@ consistent dimension, and include provider usage when available. Cloud checks
 ordering, dimensions, finite numeric values, and batch limits before storing
 vectors.
 
+For local Ollama, Go Feather exposes stable `ollama-qwen3` and
+`ollama-nomic-embed` aliases and translates them to the configured upstream
+model names. It also translates Cloud's `reasoning_effort: "none"` to
+Ollama's `think: false` for Qwen3-style thinking models. This is standalone
+provider support, not Cloud replacement qualification.
+
 ## Operational contract
 
 The gateway must provide:

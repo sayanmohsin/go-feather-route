@@ -12,8 +12,10 @@ flowchart LR
 
 The router first checks an explicit alias in `routes`. For an unaliased model,
 it can use the provider prefix in `provider/model` form when that provider is
-configured. Provider base URLs and credentials are loaded from the typed
-configuration system.
+configured. Provider aliases are translated to upstream model identifiers at
+the provider boundary, so clients keep stable names while Ollama can use names
+such as `qwen3:4b` and `nomic-embed-text`. Provider base URLs and credentials
+are loaded from the typed configuration system.
 
 Non-streaming requests use one bounded retry for transient transport, 5xx, and
 429 responses. Streaming requests are not retried after the upstream stream has

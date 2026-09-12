@@ -153,7 +153,10 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 	httpClient := provider.NewHTTPClient()
 	providers := make(map[string]provider.ClientAPI, len(cfg.Providers))
 	for name, item := range cfg.Providers {
-		providers[name] = provider.NewClient(name, item.BaseURL, item.APIKey, httpClient)
+		client := provider.NewClient(name, item.BaseURL, item.APIKey, httpClient)
+		client.Kind = item.Kind
+		client.ModelAliases = item.ModelAliases
+		providers[name] = client
 	}
 	return &Server{
 		config:             cfg,

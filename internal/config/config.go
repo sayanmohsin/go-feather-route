@@ -46,10 +46,12 @@ type AuthConfig struct {
 
 // ProviderConfig describes one upstream provider.
 type ProviderConfig struct {
-	BaseURL   string   `yaml:"base_url"`
-	APIKeyEnv string   `yaml:"api_key_env"`
-	Models    []string `yaml:"models"`
-	APIKey    string   `yaml:"-"`
+	BaseURL      string            `yaml:"base_url"`
+	APIKeyEnv    string            `yaml:"api_key_env"`
+	Kind         string            `yaml:"kind"`
+	Models       []string          `yaml:"models"`
+	ModelAliases map[string]string `yaml:"model_aliases"`
+	APIKey       string            `yaml:"-"`
 }
 
 // Overrides contains command-line values that take precedence over the
@@ -135,14 +137,33 @@ func defaults() Config {
 		Auth: AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
 		Providers: map[string]ProviderConfig{
 			// These are provider URLs and environment variable names, not credentials.
-			"openai":   {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Models: []string{"gpt-4o-mini"}},       // #nosec G101 -- no secret value is embedded.
-			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Models: []string{"deepseek-chat"}}, // #nosec G101 -- no secret value is embedded.
+			"openai":   {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Kind: "openai-compatible", Models: []string{"gpt-4o-mini"}},       // #nosec G101 -- no secret value is embedded.
+			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Kind: "openai-compatible", Models: []string{"deepseek-chat"}}, // #nosec G101 -- no secret value is embedded.
+			"ollama":   {BaseURL: "http://127.0.0.1:11434/v1", APIKeyEnv: "OLLAMA_API_KEY", Kind: "ollama", Models: []string{"ollama-qwen3", "ollama-nomic-embed"}, ModelAliases: map[string]string{"ollama-qwen3": "qwen3:4b", "ollama-nomic-embed": "nomic-embed-text"}},
 		},
-		Routes: map[string]string{"gpt-4o-mini": "openai", "deepseek-chat": "deepseek"},
+		Routes: map[string]string{"gpt-4o-mini": "openai", "deepseek-chat": "deepseek", "ollama-qwen3": "ollama", "ollama-nomic-embed": "ollama"},
 	}
 }
 
 func applyEnvironment(config *Config, env map[string]string) error {
+	if value := env["OLLAMA_API_BASE"]; value != "" {
+		if provider, ok := config.Providers["ollama"]; ok {
+			provider.BaseURL = strings.TrimRight(value, "/")
+			config.Providers["ollama"] = provider
+		}
+	}
+	if provider, ok := config.Providers["ollama"]; ok {
+		if provider.ModelAliases == nil {
+			provider.ModelAliases = make(map[string]string)
+		}
+		if value := env["OLLAMA_CHAT_MODEL"]; value != "" {
+			provider.ModelAliases["ollama-qwen3"] = value
+		}
+		if value := env["OLLAMA_EMBEDDING_MODEL"]; value != "" {
+			provider.ModelAliases["ollama-nomic-embed"] = value
+		}
+		config.Providers["ollama"] = provider
+	}
 	if value := env["GOFEATHERROUTE_ADDR"]; value != "" {
 		config.Server.Address = value
 	}
@@ -232,11 +253,18 @@ func validate(config *Config, env map[string]string) error {
 		return fmt.Errorf("server.log_level must be debug, info, warn, or error: %q", config.Server.LogLevel)
 	}
 	for name, provider := range config.Providers {
+		if provider.Kind == "" {
+			provider.Kind = "openai-compatible"
+		}
+		if provider.Kind != "openai-compatible" && provider.Kind != "ollama" {
+			return fmt.Errorf("providers.%s.kind must be openai-compatible or ollama", name)
+		}
 		parsedURL, err := url.Parse(provider.BaseURL)
 		if err != nil || parsedURL.Host == "" {
 			return fmt.Errorf("providers.%s.base_url must be a valid URL", name)
 		}
-		if parsedURL.Scheme == "http" && !config.AllowInsecureHTTP {
+		localOllama := name == "ollama" && (parsedURL.Hostname() == "127.0.0.1" || parsedURL.Hostname() == "localhost" || parsedURL.Hostname() == "host.docker.internal")
+		if parsedURL.Scheme == "http" && !config.AllowInsecureHTTP && !localOllama {
 			return fmt.Errorf("providers.%s.base_url must be an https URL unless GOFEATHERROUTE_ALLOW_INSECURE_HTTP is enabled for a benchmark fixture", name)
 		}
 		if parsedURL.Scheme != "https" && parsedURL.Scheme != "http" {

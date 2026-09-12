@@ -2,6 +2,8 @@ SHELL := /bin/sh
 
 BIN := go-feather-route
 TOOLS_BIN := $(CURDIR)/bin
+NICE_CODE_VERSION ?= 0.2.0
+NICE_CODE := npx --yes @sayanmohsin/nice-code@$(NICE_CODE_VERSION)
 
 # Staticcheck 2025.1.1 cannot read Go 1.27 export data. Pin the first
 # Go 1.27-compatible upstream revision until the next stable release.
@@ -11,7 +13,7 @@ GOSEC_VERSION := v2.29.0
 GOVULNCHECK_VERSION := v1.7.0
 GOLANGCILINT_VERSION := v2.13.2
 
-.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check bench benchmark-go benchmark-litellm benchmark-deepseek build docker check
+.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check nice-code nice-code-all nice-code-skills bench benchmark-go benchmark-litellm benchmark-deepseek build docker check
 
 tools:
 	mkdir -p $(TOOLS_BIN)
@@ -54,6 +56,15 @@ config-check:
 env-example-check:
 	go test ./internal/config -run TestEnvironmentExample
 	./scripts/check-env-example.sh
+
+nice-code:
+	$(NICE_CODE) --project . --changed --ci
+
+nice-code-all:
+	$(NICE_CODE) --project . --all --ci
+
+nice-code-skills:
+	$(NICE_CODE) skills list
 
 bench:
 	go test -bench=. -benchmem ./...

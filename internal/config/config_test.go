@@ -23,6 +23,43 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadIncludesOllamaAliases(t *testing.T) {
+	config, err := Load("", map[string]string{"OLLAMA_API_KEY": "ollama"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ollama := config.Providers["ollama"]
+	if ollama.BaseURL != "http://127.0.0.1:11434/v1" || ollama.ModelAliases["ollama-qwen3"] != "qwen3:4b" {
+		t.Fatalf("ollama config = %+v", ollama)
+	}
+}
+
+func TestOllamaEnvironmentOverrides(t *testing.T) {
+	config, err := Load("", map[string]string{
+		"OLLAMA_API_BASE":        "http://host.docker.internal:11434/v1",
+		"OLLAMA_CHAT_MODEL":      "qwen3:8b",
+		"OLLAMA_EMBEDDING_MODEL": "nomic-embed-text:latest",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ollama := config.Providers["ollama"]
+	if ollama.BaseURL != "http://host.docker.internal:11434/v1" || ollama.ModelAliases["ollama-qwen3"] != "qwen3:8b" || ollama.ModelAliases["ollama-nomic-embed"] != "nomic-embed-text:latest" {
+		t.Fatalf("ollama overrides = %+v", ollama)
+	}
+}
+
+func TestLoadRejectsUnknownProviderKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte("providers:\n  fake:\n    base_url: https://example.com/v1\n    api_key_env: FAKE_API_KEY\n    kind: unsupported\nroutes:\n  test-model: fake\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, map[string]string{"FAKE_API_KEY": "test"}); err == nil || !strings.Contains(err.Error(), ".kind must be") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCLIOverridesEnvironmentAndYAML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("server:\n  address: :4200\n"), 0o600); err != nil {
@@ -95,6 +132,10 @@ func TestEnvironmentExample(t *testing.T) {
 		"GOFEATHERROUTE_API_KEY",
 		"OPENAI_API_KEY",
 		"DEEPSEEK_API_KEY",
+		"OLLAMA_API_KEY",
+		"OLLAMA_API_BASE",
+		"OLLAMA_CHAT_MODEL",
+		"OLLAMA_EMBEDDING_MODEL",
 	} {
 		if !strings.Contains(content, name+"=") {
 			t.Fatalf(".env.example missing %s", name)

@@ -51,6 +51,26 @@ jobs:
           args: --verbose --no-progress --exclude-path 'docs/node_modules' --exclude-path 'docs/.vitepress/dist' --exclude '127\\.0\\.0\\.1' --exclude 'localhost' --exclude 'sayanmohsin\\.github\\.io/go-feather-route' --exclude 'hub\\.docker\\.com/r/sayanmohsin/go-feather-route' 'docs/*.md' 'docs/**/*.md' 'README.md'
           fail: true
 
+  nice-code:
+    name: Nice Code advisory review
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Nice Code changed-file review
+        run: npx --yes @sayanmohsin/nice-code@0.2.0 --project . --changed --ci --format sarif > nice-code.sarif
+      - name: Upload Nice Code report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: nice-code.sarif
+      - name: Publish Nice Code report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nice-code-report
+          path: nice-code.sarif
+
   docker-smoke:
     name: Docker smoke
     runs-on: ubuntu-latest
