@@ -34,7 +34,7 @@ func TestDiagnosticsAddressEnvironmentOverride(t *testing.T) {
 }
 
 func TestLoadIncludesOllamaAliases(t *testing.T) {
-	config, err := Load("", map[string]string{"OLLAMA_API_KEY": "ollama"})
+	config, err := Load("../../config/defaults.yaml", map[string]string{"OLLAMA_API_KEY": "ollama"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestLoadIncludesOllamaAliases(t *testing.T) {
 }
 
 func TestOllamaEnvironmentOverrides(t *testing.T) {
-	config, err := Load("", map[string]string{
+	config, err := Load("../../config/defaults.yaml", map[string]string{
 		"OLLAMA_API_BASE":        "http://host.docker.internal:11434/v1",
 		"OLLAMA_CHAT_MODEL":      "qwen3:8b",
 		"OLLAMA_EMBEDDING_MODEL": "nomic-embed-text:latest",
@@ -67,6 +67,38 @@ func TestLoadRejectsUnknownProviderKind(t *testing.T) {
 	}
 	if _, err := Load(path, map[string]string{"FAKE_API_KEY": "test"}); err == nil || !strings.Contains(err.Error(), ".kind must be") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadModelListBuildsLiteLLMStyleRoutes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte(`providers:
+  deepseek:
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+model_list:
+  - model_name: deepseek-v4-flash
+    provider: deepseek
+    upstream_model: deepseek-chat
+route_rules:
+  - match: "deepseek/*"
+    provider: deepseek
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path, map[string]string{"DEEPSEEK_API_KEY": "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Routes["deepseek-v4-flash"] != "deepseek" {
+		t.Fatalf("routes=%v", config.Routes)
+	}
+	if got := config.Providers["deepseek"].ModelAliases["deepseek-v4-flash"]; got != "deepseek-chat" {
+		t.Fatalf("model alias=%q", got)
+	}
+	if len(config.RouteRules) != 1 || config.RouteRules[0].Match != "deepseek/*" {
+		t.Fatalf("route rules=%v", config.RouteRules)
 	}
 }
 

@@ -40,9 +40,11 @@ docker run --rm --name go-feather-route \
   sayanmohsin/go-feather-route:0.1.0
 ```
 
-Use `DEEPSEEK_API_KEY` with the `deepseek-chat` model, or configure both keys
-to support both providers. For Doppler or another secret manager, inject the
-environment at process start rather than baking secrets into the image.
+Inject the keys required by the providers declared in the mounted YAML
+configuration. Model names and provider mappings belong in `model_list` and
+`route_rules`; adding a model does not require rebuilding the image. For
+Doppler or another secret manager, inject the environment at process start
+rather than baking secrets into the image.
 
 The image includes the optional runtime diagnostics listener, but it is
 disabled unless `GOFEATHERROUTE_PPROF_ADDR` is explicitly set. Keep that

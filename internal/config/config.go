@@ -15,12 +15,29 @@ import (
 
 // Config is the validated application configuration.
 type Config struct {
-	Server    ServerConfig              `yaml:"server"`
-	Auth      AuthConfig                `yaml:"auth"`
-	Providers map[string]ProviderConfig `yaml:"providers"`
-	Routes    map[string]string         `yaml:"routes"`
+	Server     ServerConfig              `yaml:"server"`
+	Auth       AuthConfig                `yaml:"auth"`
+	Providers  map[string]ProviderConfig `yaml:"providers"`
+	ModelList  []ModelRoute              `yaml:"model_list"`
+	Routes     map[string]string         `yaml:"routes"`
+	RouteRules []RouteRule               `yaml:"route_rules"`
 	// AllowInsecureHTTP is intended only for local benchmark fixtures.
 	AllowInsecureHTTP bool `yaml:"-"`
+}
+
+// ModelRoute is a LiteLLM-style public model name mapped to a provider model.
+// Model names remain configuration data; the gateway does not hardcode them.
+type ModelRoute struct {
+	ModelName     string `yaml:"model_name"`
+	Provider      string `yaml:"provider"`
+	UpstreamModel string `yaml:"upstream_model"`
+}
+
+// RouteRule maps arbitrary model names to a configured provider. A trailing
+// '*' is treated as a prefix match so new provider models need no code change.
+type RouteRule struct {
+	Match    string `yaml:"match"`
+	Provider string `yaml:"provider"`
 }
 
 // ServerConfig controls the HTTP server and resource limits.
@@ -80,6 +97,7 @@ func LoadWithOverrides(path string, env map[string]string, overrides Overrides) 
 			return Config{}, fmt.Errorf("parse config %q: %w", path, err)
 		}
 	}
+	normalizeModelRoutes(&config)
 	if err := applyEnvironment(&config, env); err != nil {
 		return Config{}, err
 	}
@@ -136,17 +154,30 @@ func defaults() Config {
 			MaxConcurrentEmbeddings: 2,
 			MaxConcurrentStreams:    4,
 		},
-		Auth: AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
-		Providers: map[string]ProviderConfig{
-			// These are provider URLs and environment variable names, not credentials.
-			// #nosec G101 -- no secret value is embedded.
-			"openai": {BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Kind: "openai-compatible", Models: []string{"gpt-4o-mini"}},
-			// #nosec G101 -- no secret value is embedded.
-			"deepseek": {BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Kind: "openai-compatible", Models: []string{"deepseek-chat"}},
-			// #nosec G101 -- the API key is an environment variable name, not a secret value.
-			"ollama": {BaseURL: "http://127.0.0.1:11434/v1", APIKeyEnv: "OLLAMA_API_KEY", Kind: "ollama", Models: []string{"ollama-qwen3", "ollama-nomic-embed"}, ModelAliases: map[string]string{"ollama-qwen3": "qwen3:4b", "ollama-nomic-embed": "nomic-embed-text"}},
-		},
-		Routes: map[string]string{"gpt-4o-mini": "openai", "deepseek-chat": "deepseek", "ollama-qwen3": "ollama", "ollama-nomic-embed": "ollama"},
+		Auth:       AuthConfig{APIKeyEnv: "GOFEATHERROUTE_API_KEY"},
+		Providers:  map[string]ProviderConfig{},
+		ModelList:  nil,
+		Routes:     map[string]string{},
+		RouteRules: nil,
+	}
+}
+
+func normalizeModelRoutes(config *Config) {
+	if config.Routes == nil {
+		config.Routes = make(map[string]string)
+	}
+	for _, route := range config.ModelList {
+		if route.ModelName == "" || route.Provider == "" {
+			continue
+		}
+		config.Routes[route.ModelName] = route.Provider
+		if provider, ok := config.Providers[route.Provider]; ok && route.UpstreamModel != "" {
+			if provider.ModelAliases == nil {
+				provider.ModelAliases = make(map[string]string)
+			}
+			provider.ModelAliases[route.ModelName] = route.UpstreamModel
+			config.Providers[route.Provider] = provider
+		}
 	}
 }
 
@@ -280,6 +311,25 @@ func validate(config *Config, env map[string]string) error {
 		}
 		if provider.APIKeyEnv == "" {
 			return fmt.Errorf("providers.%s.api_key_env must not be empty", name)
+		}
+	}
+	for _, route := range config.ModelList {
+		if route.ModelName == "" || route.Provider == "" {
+			return errors.New("model_list entries require model_name and provider")
+		}
+		if _, ok := config.Providers[route.Provider]; !ok {
+			return fmt.Errorf("model_list.%s references unknown provider %q", route.ModelName, route.Provider)
+		}
+	}
+	for _, rule := range config.RouteRules {
+		if rule.Match == "" || rule.Provider == "" {
+			return errors.New("route_rules entries require match and provider")
+		}
+		if _, ok := config.Providers[rule.Provider]; !ok {
+			return fmt.Errorf("route_rules.%s references unknown provider %q", rule.Match, rule.Provider)
+		}
+		if !strings.HasSuffix(rule.Match, "*") && !strings.Contains(rule.Match, "/") {
+			return fmt.Errorf("route_rules.%s must use a provider-qualified pattern or trailing *", rule.Match)
 		}
 	}
 	if env == nil {

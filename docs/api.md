@@ -46,7 +46,9 @@ small allowlist; hop-by-hop and authorization headers are never returned.
 
 ### `GET /v1/models`
 
-Returns configured model aliases in OpenAI list format.
+Returns configured `model_list` aliases in OpenAI list format. Provider-
+qualified models enabled only by `route_rules` are routable but are not
+enumerated unless they also have a `model_list` entry.
 
 ### `POST /v1/embeddings`
 

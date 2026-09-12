@@ -112,6 +112,9 @@ Configuration precedence is supported CLI flags (`-config`, `-addr`) → environ
 Non-secret defaults belong in `config/defaults.yaml`; credentials belong in
 environment variables and can be injected by Doppler or CI. See the
 [environment guide](docs/environment.md) and [configuration guide](docs/configuration.md).
+Model names and provider mappings belong in `model_list` and `route_rules`,
+not in application code. The same OpenAI-compatible SSE contract can therefore
+route DeepSeek, Ollama, OpenAI, or a future provider by configuration.
 
 ## Resource profile
 

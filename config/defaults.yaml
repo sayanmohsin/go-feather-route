@@ -18,23 +18,33 @@ providers:
     base_url: "https://api.openai.com/v1"
     api_key_env: "OPENAI_API_KEY"
     kind: "openai-compatible"
-    models: ["gpt-4o-mini"]
   deepseek:
     base_url: "https://api.deepseek.com/v1"
     api_key_env: "DEEPSEEK_API_KEY"
     kind: "openai-compatible"
-    models: ["deepseek-chat"]
   ollama:
     base_url: "http://127.0.0.1:11434/v1"
     api_key_env: "OLLAMA_API_KEY"
     kind: "ollama"
-    models: ["ollama-qwen3", "ollama-nomic-embed"]
-    model_aliases:
-      ollama-qwen3: "qwen3:4b"
-      ollama-nomic-embed: "nomic-embed-text"
 
-routes:
-  gpt-4o-mini: openai
-  deepseek-chat: deepseek
-  ollama-qwen3: ollama
-  ollama-nomic-embed: ollama
+model_list:
+  - model_name: gpt-4o-mini
+    provider: openai
+    upstream_model: gpt-4o-mini
+  - model_name: deepseek-chat
+    provider: deepseek
+    upstream_model: deepseek-chat
+  - model_name: ollama-qwen3
+    provider: ollama
+    upstream_model: qwen3:4b
+  - model_name: ollama-nomic-embed
+    provider: ollama
+    upstream_model: nomic-embed-text
+
+route_rules:
+  - match: "deepseek/*"
+    provider: deepseek
+  - match: "ollama/*"
+    provider: ollama
+  - match: "openai/*"
+    provider: openai

@@ -29,3 +29,16 @@ func TestRoutesModelsAreSorted(t *testing.T) {
 		t.Fatalf("models=%v", models)
 	}
 }
+
+func TestRoutesResolveProviderQualifiedAndWildcardModels(t *testing.T) {
+	routes := NewRoutesWithRules(
+		map[string]string{"deepseek-v4-flash": "deepseek"},
+		[]Rule{{Match: "deepseek/*", Provider: "deepseek"}, {Match: "ollama-*", Provider: "ollama"}},
+	)
+	if provider, ok := routes.ProviderFor("deepseek/deepseek-reasoner"); !ok || provider != "deepseek" {
+		t.Fatalf("provider-qualified route=%q ok=%t", provider, ok)
+	}
+	if provider, ok := routes.ProviderFor("ollama-qwen3"); !ok || provider != "ollama" {
+		t.Fatalf("wildcard route=%q ok=%t", provider, ok)
+	}
+}

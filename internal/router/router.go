@@ -158,9 +158,13 @@ func NewServer(cfg config.Config, logger *slog.Logger) *Server {
 		client.ModelAliases = item.ModelAliases
 		providers[name] = client
 	}
+	rules := make([]gateway.Rule, 0, len(cfg.RouteRules))
+	for _, rule := range cfg.RouteRules {
+		rules = append(rules, gateway.Rule{Match: rule.Match, Provider: rule.Provider})
+	}
 	return &Server{
 		config:             cfg,
-		routes:             gateway.NewRoutes(cfg.Routes),
+		routes:             gateway.NewRoutesWithRules(cfg.Routes, rules),
 		providers:          providers,
 		semaphore:          make(chan struct{}, cfg.Server.MaxConcurrentRequests),
 		embeddingSemaphore: make(chan struct{}, cfg.Server.MaxConcurrentEmbeddings),

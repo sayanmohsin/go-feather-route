@@ -162,7 +162,7 @@ func (c Client) prepareChatBody(body []byte) ([]byte, error) {
 		return nil, err
 	}
 	if c.Kind != "ollama" {
-		return prepared, nil
+		return c.stripProviderPrefix(prepared), nil
 	}
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(prepared, &request); err != nil {
@@ -176,12 +176,41 @@ func (c Client) prepareChatBody(body []byte) ([]byte, error) {
 		request["think"] = json.RawMessage("false")
 		delete(request, "reasoning_effort")
 	}
-	return json.Marshal(request)
+	prepared, err = json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	return c.stripProviderPrefix(prepared), nil
+}
+
+func (c Client) stripProviderPrefix(body []byte) []byte {
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(body, &request); err != nil {
+		return body
+	}
+	value, ok := request["model"]
+	if !ok {
+		return body
+	}
+	var model string
+	if err := json.Unmarshal(value, &model); err != nil {
+		return body
+	}
+	prefix, upstream, ok := strings.Cut(model, "/")
+	if !ok || prefix != c.Name || upstream == "" {
+		return body
+	}
+	request["model"], _ = json.Marshal(upstream)
+	prepared, err := json.Marshal(request)
+	if err != nil {
+		return body
+	}
+	return prepared
 }
 
 func (c Client) prepareModelBody(body []byte) ([]byte, error) {
 	if len(c.ModelAliases) == 0 {
-		return body, nil
+		return c.stripProviderPrefix(body), nil
 	}
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(body, &request); err != nil {
@@ -199,9 +228,13 @@ func (c Client) prepareModelBody(body []byte) ([]byte, error) {
 			return nil, fmt.Errorf("prepare provider model: %w", err)
 		}
 		request["model"] = encoded
-		return json.Marshal(request)
+		body, err = json.Marshal(request)
+		if err != nil {
+			return nil, fmt.Errorf("prepare provider model: %w", err)
+		}
+		return c.stripProviderPrefix(body), nil
 	}
-	return body, nil
+	return c.stripProviderPrefix(body), nil
 }
 
 func retryReasonForStatus(status int) string {

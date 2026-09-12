@@ -33,3 +33,29 @@ Validate configuration with:
 make config-check
 make env-example-check
 ```
+
+## Model routing
+
+Provider model names are configuration data, not Go code. Use `model_list` to
+publish the model identifiers that clients send and map them to an upstream
+provider model:
+
+```yaml
+model_list:
+  - model_name: deepseek-chat
+    provider: deepseek
+    upstream_model: deepseek-chat
+
+route_rules:
+  - match: deepseek/*
+    provider: deepseek
+```
+
+Exact `model_list` entries are advertised by `GET /v1/models`. A provider
+qualified name such as `deepseek/new-model` is accepted by a matching
+`route_rules` entry and is forwarded as `new-model`; adding a new provider or
+model therefore requires configuration and credentials, not a code change.
+Provider API keys are injected through the variable named by `api_key_env`.
+In production, keep those variables in Doppler. For local development, the
+same variables may be supplied through the shell or a local env file; the
+gateway does not require Open Envault.

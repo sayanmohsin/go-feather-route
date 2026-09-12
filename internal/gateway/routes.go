@@ -6,19 +6,30 @@ import (
 	"strings"
 )
 
+type Rule struct {
+	Match    string
+	Provider string
+}
+
 // Routes is an immutable model-to-provider routing table.
 type Routes struct {
 	byModel map[string]string
+	rules   []Rule
 }
 
 // NewRoutes copies the supplied route configuration so runtime routing cannot
 // be changed by a caller retaining the original map.
 func NewRoutes(routes map[string]string) Routes {
+	return NewRoutesWithRules(routes, nil)
+}
+
+func NewRoutesWithRules(routes map[string]string, rules []Rule) Routes {
 	copyOfRoutes := make(map[string]string, len(routes))
 	for model, provider := range routes {
 		copyOfRoutes[model] = provider
 	}
-	return Routes{byModel: copyOfRoutes}
+	copyOfRules := append([]Rule(nil), rules...)
+	return Routes{byModel: copyOfRoutes, rules: copyOfRules}
 }
 
 // ProviderFor resolves an exact model alias, then accepts provider/model
@@ -28,12 +39,23 @@ func (r Routes) ProviderFor(model string) (string, bool) {
 		return provider, true
 	}
 	provider, _, ok := strings.Cut(model, "/")
-	if !ok || provider == "" {
-		return "", false
+	if ok && provider != "" {
+		for _, rule := range r.rules {
+			if rule.Match == provider+"/*" {
+				return rule.Provider, true
+			}
+		}
+		if len(r.rules) == 0 {
+			for _, configuredProvider := range r.byModel {
+				if configuredProvider == provider {
+					return provider, true
+				}
+			}
+		}
 	}
-	for _, configuredProvider := range r.byModel {
-		if configuredProvider == provider {
-			return provider, true
+	for _, rule := range r.rules {
+		if strings.HasSuffix(rule.Match, "*") && strings.HasPrefix(model, strings.TrimSuffix(rule.Match, "*")) {
+			return rule.Provider, true
 		}
 	}
 	return "", false
@@ -51,6 +73,8 @@ func (r Routes) Models() []string {
 
 // ProviderForModel returns the configured provider for an exact model alias.
 func (r Routes) ProviderForModel(model string) (string, bool) {
-	provider, ok := r.byModel[model]
-	return provider, ok && provider != ""
+	if provider, ok := r.byModel[model]; ok && provider != "" {
+		return provider, true
+	}
+	return r.ProviderFor(model)
 }

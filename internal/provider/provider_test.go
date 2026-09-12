@@ -65,6 +65,38 @@ func TestOllamaClientMapsEmbeddingAlias(t *testing.T) {
 	defer func() { _ = result.Body.Close() }()
 }
 
+func TestClientStripsProviderQualifiedModelBeforeForwarding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "deepseek-reasoner" {
+			t.Fatalf("model=%v", body["model"])
+		}
+		_, _ = response.Write([]byte(`{"id":"chat","choices":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("deepseek", server.URL, "secret", server.Client())
+	result, err := client.Chat(context.Background(), []byte(`{"model":"deepseek/deepseek-reasoner","messages":[]}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = result.Body.Close() }()
+}
+
+func TestClientStripsProviderQualifiedEmbeddingModelBeforeForwarding(t *testing.T) {
+	client := Client{Name: "deepseek", ModelAliases: map[string]string{}}
+	prepared, err := client.prepareModelBody([]byte(`{"model":"deepseek/text-embedding-3-small","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("prepare model body: %v", err)
+	}
+	if got := string(prepared); !strings.Contains(got, `"model":"text-embedding-3-small"`) {
+		t.Fatalf("expected provider prefix to be removed, got %s", got)
+	}
+}
+
 func TestClientRetriesRetryableNonStreamingResponse(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
