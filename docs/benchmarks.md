@@ -21,6 +21,61 @@ Compare two saved benchmark outputs with:
 benchstat before.txt after.txt
 ```
 
+## Go 1.27 validation
+
+The module declares Go 1.27.1. Capture the allocation baseline with the same
+toolchain used by CI:
+
+```bash
+go version
+go test -bench=. -benchmem ./...
+```
+
+Allocation-focused benchmarks cover provider selection, authenticated
+requests, JSON chat proxying, request-ID propagation, streaming, embeddings,
+and the metrics endpoint. They use deterministic in-process providers and
+report allocations and bytes per operation without exposing prompts, tokens,
+keys, or provider responses.
+
+For repeatable Docker measurements, run the warm/cold workload matrix for each
+gateway:
+
+```bash
+BENCHMARK_OUTPUT_DIR="${TMPDIR:-/tmp}/go-feather-route-benchmarks/go" \
+  ./benchmarks/run-matrix.sh go
+BENCHMARK_OUTPUT_DIR="${TMPDIR:-/tmp}/go-feather-route-benchmarks/litellm" \
+  ./benchmarks/run-matrix.sh litellm
+```
+
+The matrix covers chat at concurrency 1, 4, and 16; streaming at concurrency
+1 and 4; and single and warmed embedding requests. A warm run sends bounded
+warm-up requests before measurement; a cold run sends none. Every metadata
+record includes the commit, Go version, host and image architecture, execution
+mode, request count, concurrency, warm-up count, image digest when available,
+and container limit. Unavailable values are represented as unavailable or
+`null`, never as a fabricated zero.
+
+The gateway instrumentation is part of the production request path, so the
+matrix measures metrics-enabled requests. A metrics-disabled comparison is
+intentionally not reported because it would not represent the deployed
+gateway behavior.
+
+To collect native CPU and heap profiles without adding tracked artifacts:
+
+```bash
+mkdir -p "${TMPDIR:-/tmp}/go-feather-route-profiles"
+go test ./internal/router -run '^$' \
+  -bench='Benchmark(NonStreamingProxy|StreamingProxy|EmbeddingProxy)$' \
+  -benchtime=10s -benchmem \
+  -cpuprofile="${TMPDIR:-/tmp}/go-feather-route-profiles/cpu.pprof" \
+  -memprofile="${TMPDIR:-/tmp}/go-feather-route-profiles/memory.pprof"
+```
+
+Go 1.27 results must be compared only with a reproducible pre-Go-1.27 build
+that uses the same architecture, flags, provider fixture, and workload. If
+that toolchain is unavailable, report the Go 1.27 baseline without attributing
+any gateway-level improvement to the allocator.
+
 ## LiteLLM comparison
 
 Run each gateway against the same fake provider:

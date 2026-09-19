@@ -13,7 +13,7 @@ GOSEC_VERSION := v2.29.0
 GOVULNCHECK_VERSION := v1.7.0
 GOLANGCILINT_VERSION := v2.13.2
 
-.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check nice-code nice-code-all nice-code-skills bench benchmark-go benchmark-litellm benchmark-deepseek build docker profile-goroutines check
+.PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check nice-code nice-code-all nice-code-skills bench benchmark-go benchmark-litellm benchmark-matrix-go benchmark-matrix-litellm benchmark-deepseek build docker profile-goroutines check
 
 tools:
 	mkdir -p $(TOOLS_BIN)
@@ -74,6 +74,12 @@ benchmark-go:
 
 benchmark-litellm:
 	./benchmarks/run.sh litellm
+
+benchmark-matrix-go:
+	./benchmarks/run-matrix.sh go
+
+benchmark-matrix-litellm:
+	./benchmarks/run-matrix.sh litellm
 
 benchmark-deepseek:
 	./scripts/benchmark-deepseek.sh

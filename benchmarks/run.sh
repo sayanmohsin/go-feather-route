@@ -15,7 +15,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 benchmark_dir="$root_dir/benchmarks"
 project="go-feather-route-benchmark-$target"
 compose=(docker compose --project-name "$project" --file "$benchmark_dir/docker-compose.yml" --profile "$target")
-result_dir="${BENCHMARK_OUTPUT_DIR:-$benchmark_dir/results}/$(date -u +%Y%m%dT%H%M%SZ)-$target"
+result_name="${BENCHMARK_RESULT_NAME:-$(date -u +%Y%m%dT%H%M%SZ)-$target}"
+result_dir="${BENCHMARK_OUTPUT_DIR:-$benchmark_dir/results}/$result_name"
 mkdir -p "$result_dir"
 if [[ -z "${BENCHMARK_HOST_PORT:-}" ]]; then
   if [[ "$target" == "go" ]]; then
@@ -49,9 +50,22 @@ execution_mode="native"
 if [[ -n "$gateway_architecture" && "$gateway_architecture" != "$normalized_host_architecture" ]]; then
   execution_mode="emulated-or-translated"
 fi
-printf '{"gateway":"%s","operation":"%s","streaming":%s,"requests":%s,"concurrency":%s,"host_architecture":"%s","gateway_image_id":"%s","gateway_image_digest":"%s","gateway_image_size_bytes":%s,"gateway_memory_limit_bytes":%s,"gateway_architecture":"%s","native_or_emulated":"%s"}\n' \
+if [[ -n "${BENCHMARK_EXECUTION_MODE:-}" ]]; then
+  execution_mode="$BENCHMARK_EXECUTION_MODE"
+fi
+gateway_image_size_json="${gateway_image_size:-null}"
+gateway_memory_limit_json="${gateway_memory_limit:-null}"
+gateway_image_id_json="${gateway_image:-unavailable}"
+gateway_digest_json="${gateway_digest:-unavailable}"
+gateway_architecture_json="${gateway_architecture:-unavailable}"
+commit="$(git -C "$root_dir" rev-parse --short HEAD 2>/dev/null || true)"
+go_version="not-applicable"
+if [[ "$target" == "go" ]]; then
+  go_version="$(go version 2>/dev/null || true)"
+fi
+printf '{"gateway":"%s","operation":"%s","streaming":%s,"requests":%s,"concurrency":%s,"warmup":%s,"commit":"%s","go_version":"%s","host_architecture":"%s","gateway_image_id":"%s","gateway_image_digest":"%s","gateway_image_size_bytes":%s,"gateway_memory_limit_bytes":%s,"gateway_architecture":"%s","native_or_emulated":"%s"}\n' \
   "$target" "${BENCHMARK_OPERATION:-chat}" "${BENCHMARK_STREAMING:-false}" "${BENCHMARK_REQUESTS:-32}" "${BENCHMARK_CONCURRENCY:-1}" \
-  "$normalized_host_architecture" "$gateway_image" "$gateway_digest" "${gateway_image_size:-0}" "${gateway_memory_limit:-0}" "$gateway_architecture" "$execution_mode" \
+  "${BENCHMARK_WARMUP:-0}" "$commit" "$go_version" "$normalized_host_architecture" "$gateway_image_id_json" "$gateway_digest_json" "$gateway_image_size_json" "$gateway_memory_limit_json" "$gateway_architecture_json" "$execution_mode" \
   >"$result_dir/metadata.json"
 
 for attempt in $(seq 1 60); do
@@ -103,7 +117,7 @@ record_cgroup() {
       cpu_throttled="$(awk '$1 == "throttled_usec" {print $2}' "$cgroup_dir/cpu.stat")"
       cpu_throttle_count="$(awk '$1 == "nr_throttled" {print $2}' "$cgroup_dir/cpu.stat")"
       printf '{"timestamp":"%s","cgroup_label":"%s","memory_peak":%s,"memory_current":%s,"cpu_usage_usec":%s,"cpu_throttled_usec":%s,"cpu_throttle_count":%s}\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$label" "${memory_peak:-0}" "${memory_current:-0}" "${cpu_usage:-0}" "${cpu_throttled:-0}" "${cpu_throttle_count:-0}" >>"$resource_file"
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$label" "${memory_peak:-null}" "${memory_current:-null}" "${cpu_usage:-null}" "${cpu_throttled:-null}" "${cpu_throttle_count:-null}" >>"$resource_file"
       return
     fi
   done

@@ -12,6 +12,14 @@ Run one gateway:
 ./benchmarks/run.sh litellm
 ```
 
+Run the repeatable warm/cold matrix for one gateway. Results default to a
+temporary directory outside the repository:
+
+```bash
+./benchmarks/run-matrix.sh go
+./benchmarks/run-matrix.sh litellm
+```
+
 Control the workload:
 
 ```bash
@@ -22,8 +30,11 @@ BENCHMARK_OPERATION=embeddings BENCHMARK_REQUESTS=64 BENCHMARK_CONCURRENCY=8 ./b
 
 Each run writes sanitized request results, raw Docker resource samples, a
 workload/architecture metadata record, and container inspection data under
-`benchmarks/results/`. Set `BENCHMARK_EXECUTION_MODE=native` or
-`BENCHMARK_EXECUTION_MODE=emulated` when the runtime differs from the host.
+`benchmarks/results/` unless `BENCHMARK_OUTPUT_DIR` points elsewhere. The
+matrix uses a unique result name for every workload so warm and cold runs can
+be compared without overwriting artifacts. Set
+`BENCHMARK_EXECUTION_MODE=native` or `BENCHMARK_EXECUTION_MODE=emulated` when
+the runtime differs from the host.
 
 Resource samples include Docker CPU percentage, memory usage/limit, network
 I/O, block I/O, process count, host memory where available, and final OOM and
@@ -34,6 +45,22 @@ the cgroup files. Docker Desktop may omit those host-level cgroup fields.
 The runner supports both `chat` and `embeddings` operations. Streaming applies
 to chat only. Each result records the gateway, operation, workload, and raw
 resource samples so comparisons use the same request shape and concurrency.
+
+The gateway's production instrumentation is enabled for every request. The
+matrix therefore measures the real metrics-enabled path and does not report a
+synthetic metrics-disabled result. Missing host, cgroup, or image measurements
+are recorded as unavailable, never as zero.
+
+For native allocation and CPU profiles, keep output outside the repository:
+
+```bash
+mkdir -p "${TMPDIR:-/tmp}/go-feather-route-profiles"
+go test ./internal/router -run '^$' \
+  -bench='Benchmark(NonStreamingProxy|StreamingProxy|EmbeddingProxy)$' \
+  -benchtime=10s -benchmem \
+  -cpuprofile="${TMPDIR:-/tmp}/go-feather-route-profiles/cpu.pprof" \
+  -memprofile="${TMPDIR:-/tmp}/go-feather-route-profiles/memory.pprof"
+```
 
 ## Optional DeepSeek smoke test
 
