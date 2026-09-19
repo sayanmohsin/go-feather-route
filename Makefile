@@ -2,15 +2,14 @@ SHELL := /bin/sh
 
 BIN := go-feather-route
 TOOLS_BIN := $(CURDIR)/bin
-NICE_CODE_VERSION ?= 0.2.0
+NICE_CODE_VERSION ?= 0.3.2
 NICE_CODE := npx --yes @sayanmohsin/nice-code@$(NICE_CODE_VERSION)
 
-# Staticcheck 2025.1.1 cannot read Go 1.27 export data. Pin the first
-# Go 1.27-compatible upstream revision until the next stable release.
-STATICCHECK_VERSION := v0.7.0-0.dev.0.20260824195211-6cb65e58a558
-GOIMPORTS_VERSION := v0.36.0
+# Pin Go 1.27-compatible tool releases so local and CI quality checks agree.
+STATICCHECK_VERSION := v0.8.1
+GOIMPORTS_VERSION := v0.50.0
 GOSEC_VERSION := v2.29.0
-GOVULNCHECK_VERSION := v1.7.0
+GOVULNCHECK_VERSION := v1.8.0
 GOLANGCILINT_VERSION := v2.13.2
 
 .PHONY: tools fmt fmt-check test race coverage lint security config-check env-example-check nice-code nice-code-all nice-code-skills bench benchmark-go benchmark-litellm benchmark-matrix-go benchmark-matrix-litellm benchmark-deepseek build docker profile-goroutines check

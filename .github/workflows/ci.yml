@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Run Nice Code changed-file review
-        run: npx --yes @sayanmohsin/nice-code@0.2.0 --project . --changed --ci --format sarif > nice-code.sarif
+        run: npx --yes @sayanmohsin/nice-code@0.3.2 --project . --changed --ci --format sarif > nice-code.sarif
       - name: Upload Nice Code report
         if: always()
         uses: github/codeql-action/upload-sarif@v4
